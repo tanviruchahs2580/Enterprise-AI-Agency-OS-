@@ -1,0 +1,33 @@
+{
+  "title": "Agency OS — Executive",
+  "uid": "agencyos-exec",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat", "title": "System Health", "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "agencyos_database_up" }]
+    },
+    {
+      "type": "timeseries", "title": "Request rate (req/s)", "gridPos": { "x": 6, "y": 0, "w": 12, "h": 4 },
+      "targets": [{ "expr": "sum(rate(agencyos_http_requests_total[5m]))" }]
+    },
+    {
+      "type": "stat", "title": "Active Jobs (running)", "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "agencyos_queue_jobs{status=\"running\"}" }]
+    },
+    {
+      "type": "timeseries", "title": "Error rate (5xx/s)", "gridPos": { "x": 0, "y": 4, "w": 8, "h": 5 },
+      "targets": [{ "expr": "sum(rate(agencyos_http_requests_total{status=~\"5..\"}[5m]))" }]
+    },
+    {
+      "type": "gauge", "title": "Queue backlog (pending)", "gridPos": { "x": 8, "y": 4, "w": 8, "h": 5 },
+      "targets": [{ "expr": "agencyos_queue_jobs{status=\"pending\"}" }]
+    },
+    {
+      "type": "timeseries", "title": "Model spend ($ total)", "gridPos": { "x": 16, "y": 4, "w": 8, "h": 5 },
+      "targets": [{ "expr": "agencyos_model_cost_usd_total" }]
+    }
+  ]
+}

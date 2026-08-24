@@ -1,0 +1,72 @@
+groups:
+  - name: agencyos-production
+    interval: 30s
+    rules:
+      # Rationale: API down = total outage; alert immediately.
+      - alert: ApiDown
+        expr: up{job="agencyos-control-plane"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Control plane unreachable for >1m"
+
+      # Rationale: readiness gates user traffic; DB is the only hard dependency.
+      - alert: ReadinessFailing
+        expr: agencyos_database_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Database unreachable from control plane"
+
+      # Rationale: 5xx rate >5% over 5m indicates systemic failure (SRE standard).
+      - alert: HighErrorRate
+        expr: >
+          sum(rate(agencyos_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(agencyos_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx ratio above 5% for 5 minutes"
+
+      # Rationale: p95 latency budget 200ms; sustained breach burns SLO.
+      - alert: HighLatencyP95
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(agencyos_http_request_duration_seconds_bucket[10m])) by (le)
+          ) > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 latency above 200ms for 10 minutes"
+
+      # Rationale: pending jobs older than growth indicate worker starvation.
+      - alert: QueueBacklog
+        expr: agencyos_queue_jobs{status="pending"} > 50
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Queue backlog above 50 pending jobs for 10 minutes"
+
+      - alert: DeadLetterJobs
+        expr: agencyos_queue_jobs{status="dead_letter"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Jobs reached dead-letter state"
+
+      # Rationale: model spend is the primary variable cost; spike = runaway loop or abuse.
+      - alert: ModelCostSpike
+        expr: rate(agencyos_model_cost_usd_total[15m]) * 3600 > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Model spend burn-rate above $5/hour"
+
+      - alert: ModelFailureSpike
+        expr: >
+          sum(rate(agencyos_model_requests_failed_total[10m])) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than 5 model request failures per second-equivalent window"

@@ -12,7 +12,8 @@ parentPort.on("message", async (msg) => {
     let payload;
     try {
       payload = enc.encode(JSON.stringify(obj));
-    } catch {`n      payload = enc.encode(JSON.stringify({ ok: false, error: "serialize failed" }));
+    } catch (_e) {
+      payload = enc.encode(JSON.stringify({ ok: false, error: "serialize failed" }));
     }
     if (payload.length > u8.length) {
       const errPayload = enc.encode(JSON.stringify({ ok: false, error: "result exceeds bridge limit" }));

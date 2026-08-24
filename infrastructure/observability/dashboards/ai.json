@@ -1,0 +1,24 @@
+{
+  "title": "Agency OS — AI & Cost",
+  "uid": "agencyos-ai",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries", "title": "Model request rate", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 6 },
+      "targets": [{ "expr": "rate(agencyos_model_requests_total[5m])" }]
+    },
+    {
+      "type": "timeseries", "title": "Model failures", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 6 },
+      "targets": [{ "expr": "rate(agencyos_model_requests_failed_total[5m])" }]
+    },
+    {
+      "type": "timeseries", "title": "Fallbacks", "gridPos": { "x": 0, "y": 6, "w": 12, "h": 6 },
+      "targets": [{ "expr": "rate(agencyos_model_fallbacks_total[5m])" }]
+    },
+    {
+      "type": "timeseries", "title": "Cumulative cost (USD)", "gridPos": { "x": 12, "y": 6, "w": 12, "h": 6 },
+      "targets": [{ "expr": "agencyos_model_cost_usd_total" }]
+    }
+  ]
+}

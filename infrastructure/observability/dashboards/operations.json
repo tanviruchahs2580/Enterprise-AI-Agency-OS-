@@ -1,0 +1,24 @@
+{
+  "title": "Agency OS — Operations",
+  "uid": "agencyos-ops",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat", "title": "Pending approvals", "gridPos": { "x": 0, "y": 0, "w": 8, "h": 5 },
+      "targets": [{ "expr": "agencyos_approvals_pending" }]
+    },
+    {
+      "type": "stat", "title": "Dead-letter jobs", "gridPos": { "x": 8, "y": 0, "w": 8, "h": 5 },
+      "targets": [{ "expr": "agencyos_queue_jobs{status=\"dead_letter\"}" }]
+    },
+    {
+      "type": "timeseries", "title": "Failed executions", "gridPos": { "x": 16, "y": 0, "w": 8, "h": 5 },
+      "targets": [{ "expr": "agencyos_executions{status=\"failed\"}" }]
+    },
+    {
+      "type": "logs", "title": "Audit trail (via Loki, optional)", "gridPos": { "x": 0, "y": 5, "w": 24, "h": 8 },
+      "description": "Wire Loki promtail to control-plane stdout for audit event streaming (optional profile)."
+    }
+  ]
+}
