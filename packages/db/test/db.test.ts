@@ -59,9 +59,9 @@ test("schema supports full org→project→task flow with FK integrity", () => {
   assert.equal(dep?.task_id, taskB);
 
   // optimistic locking: stale version update fails
-  const ok1 = db.updateById("tasks", taskA, { title: "v2" }, 1);
+  const ok1 = db.updateById("tasks", taskA, { title: "v2" }, { expectedVersion: 1, bumpVersion: true });
   assert.ok(ok1);
-  const ok2 = db.updateById("tasks", taskA, { title: "v3-stale" }, 1);
+  const ok2 = db.updateById("tasks", taskA, { title: "v3-stale" }, { expectedVersion: 1, bumpVersion: true });
   assert.equal(ok2, false);
 
   // FK enforcement blocks orphan insert

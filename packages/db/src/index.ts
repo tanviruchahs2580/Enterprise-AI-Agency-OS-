@@ -1,6 +1,9 @@
 import { newId } from "@agency/core";
 import type { DatabaseDriver, Row } from "./driver.ts";
 
+export * from "./driver.ts";
+export * from "./migrate.ts";
+
 /** Thin typed facade over the driver with org-scoped helpers. */
 export class Db {
   public readonly driver: DatabaseDriver;
@@ -30,21 +33,24 @@ export class Db {
     this.driver.run(sql, keys.map((k) => data[k]));
   }
 
+  /**
+   * Update a row by id. When `expectedVersion` is provided the update is
+   * conditional on the current optimistic-lock version (which is then bumped).
+   */
   updateById(
     table: string,
     id: string,
     data: Record<string, unknown>,
-    expectedVersion?: number
+    opts?: { expectedVersion?: number; bumpVersion?: boolean }
   ): boolean {
     const cols = Object.keys(data);
-    // Auto-increment optimistic-lock counter unless the caller sets it explicitly.
     const setSql =
       cols.map((c) => `${c} = ?`).join(", ") +
-      ("version" in data ? "" : ", version = version + 1");
+      (opts?.bumpVersion && !("version" in data) ? ", version = version + 1" : "");
     const params = [...cols.map((c) => data[c]), id];
     let sql = `UPDATE ${table} SET ${setSql} WHERE id = ?`;
-    if (expectedVersion !== undefined) {
-      sql += ` AND version = ${Number(expectedVersion)}`;
+    if (opts?.expectedVersion !== undefined) {
+      sql += ` AND version = ${Number(opts.expectedVersion)}`;
     }
     const res = this.driver.run(sql, params);
     return Number(res.changes) > 0;
