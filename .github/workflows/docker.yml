@@ -28,8 +28,7 @@ jobs:
           push: false
           load: true
           tags: agencyos-control-plane:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
 
       - name: Start PostgreSQL service container
         run: |
