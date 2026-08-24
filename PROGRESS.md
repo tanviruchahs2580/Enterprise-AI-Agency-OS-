@@ -2,6 +2,16 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.3.0 — PRODUCTION CERTIFIED (2026-08-25)
+- [x] Certification gate: **CERTIFIED** — all mandatory gates PASS
+      (docs/PRODUCTION-CERTIFICATION-REPORT.md)
+- [x] Docker validation: build/run/smoke/persistence/non-root/log-leak/Trivy
+      scan — GREEN in CI on main + v0.3.0 tag
+- [x] Security fixes: brace-expansion/undici/tar patched via overrides+lockfile
+      regen; admin key no longer logged in full
+- [x] 59/59 tests · coverage gates met · load test p95≤182ms @100 concurrent ·
+      PG extended drill 7/7 · backup/restore verified · clean-env drill verified
+
 ## v0.3.0 — production certification cycle (2026-08-25)
 - [x] Docker validation unblocked via CI: docker.yml (build/run/smoke/persist/
       non-root/log-leak/Trivy scan) — runs on every push & PR
