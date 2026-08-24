@@ -18,7 +18,7 @@ Verdict: **CERTIFIED**
 | AI/model routing | fallback/budget/context guards | PASS | models suite incl. context-overflow regression |
 | Git integration | worktree isolation loop | PASS | worktree.test.ts vs real git |
 | Observability | /metrics + /ready live | PASS | 31 lines scraped |
-| Backup | backup procedure | PASS | OPERATIONS-RUNBOOK ??backup (sqlite/pg commands) |
+| Backup | backup procedure | PASS | OPERATIONS-RUNBOOK backup section (sqlite/pg commands) |
 | Restore | restore drill | PASS | row-equality drill executed (PROGRESS.md) |
 | Disaster Recovery | restart & outage drills | PASS | recovery.test.ts + G-11 readiness failure |
 | Rollback | app rollback procedure | PASS | docs/ROLLBACK-RUNBOOK.md; compose image rollback = docker-host step |
