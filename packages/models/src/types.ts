@@ -95,3 +95,9 @@ export function estimateCost(m: ModelDescriptor, usage: CompletionUsage): number
     (usage.tokensOut / 1000) * m.outputCostPer1k
   );
 }
+
+/** Larger windows for the overflow guard's per-model check. */
+export interface ContextWindowCheck {
+  modelId: string;
+  contextWindow: number;
+}

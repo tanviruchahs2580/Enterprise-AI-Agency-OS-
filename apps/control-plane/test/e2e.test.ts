@@ -59,7 +59,7 @@ after(async () => {
   try {
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5 });
   } catch {
-    /* Windows may hold WAL briefly — temp dir is disposable */
+    /* Windows may hold WAL briefly â€” temp dir is disposable */
   }
 });
 
@@ -125,7 +125,7 @@ test("T21: production deployment blocked without approval gate", async () => {
   const err = dep.body.error as { code?: string } | undefined;
   assert.equal(err?.code, "APPROVAL_REQUIRED");
 
-  // request approval → decide → retry passes
+  // request approval â†’ decide â†’ retry passes
   const apr = await api("POST", "/api/v1/approvals", {
     action: "deploy:production",
     resourceType: "deployment",
@@ -162,7 +162,7 @@ test("RBAC: engineer role is restricted", async () => {
 });
 
 test("model routing records fallbacks and costs (T19, T20)", async () => {
-  // budget that always blocks → BUDGET_EXCEEDED path is covered in unit tests.
+  // budget that always blocks â†’ BUDGET_EXCEEDED path is covered in unit tests.
   // here verify the success path persists a model_request row.
   const comp = await api("POST", "/api/v1/models/complete", { prompt: "ping", tier: "FAST" });
   assert.equal(comp.status, 200);
@@ -242,7 +242,7 @@ test("TENANT ISOLATION: organization B cannot access organization A resources", 
   assert.equal(namesB.filter((n) => n === "Billing Service").length, 0);
 });
 
-test("WORKER EXECUTION: dispatch → job → model → artifact → cost → transition", async () => {
+test("WORKER EXECUTION: dispatch â†’ job â†’ model â†’ artifact â†’ cost â†’ transition", async () => {
   const prj = await api("POST", "/api/v1/projects", { name: "Exec Flow" });
   const projectId = String(prj.body.id);
   const task = await api("POST", "/api/v1/tasks", { projectId, title: "Plan the invoice module" });
@@ -337,7 +337,7 @@ test("APPROVAL TIMEOUT: expired request cannot be decided and gate stays closed"
   const err = decided.body.error as { message?: string };
   assert.match(String(err.message), /expired/);
 
-  // gate remains closed — APPROVAL_REQUIRED surfaces as HTTP 202 by design
+  // gate remains closed â€” APPROVAL_REQUIRED surfaces as HTTP 202 by design
   const dep = await api("POST", "/api/v1/deployments", {
     projectId: resId, environment: "production", version: "9.9.9", commitSha: "ff",
   });
@@ -372,7 +372,7 @@ test("CONCURRENCY: optimistic locking prevents lost updates on same task", async
   const t = await api("POST", "/api/v1/tasks", { projectId, title: "Contended" });
   const id = String(t.body.id);
 
-  // two concurrent transitions to 'ready' — exactly one wins at DB level
+  // two concurrent transitions to 'ready' â€” exactly one wins at DB level
   const results = await Promise.all([
     api("POST", `/api/v1/tasks/${id}/transition`, { to: "ready" }),
     api("POST", `/api/v1/tasks/${id}/transition`, { to: "ready" }),
@@ -386,7 +386,7 @@ test("CONCURRENCY: optimistic locking prevents lost updates on same task", async
 // ---------------------------------------------------------------------------
 
 test("G-02 METRICS: prometheus endpoint exposes live series", async () => {
-  // public path — no auth needed by design
+  // public path â€” no auth needed by design
   const res = await app.inject({ method: "GET", url: "/metrics" });
   assert.equal(res.statusCode, 200);
   const body = res.body;
@@ -423,11 +423,11 @@ test("G-06 SSE TICKETS: one-time short-TTL tickets replace raw key in URL", asyn
     (e: unknown) => String((e as Error).message).length >= 0
   );
 
-  // ticket is single-use — second connection rejected
+  // ticket is single-use â€” second connection rejected
   const reuse = await app.inject({ method: "GET", url: `/api/v1/events?ticket=${ticket}` });
   assert.equal(reuse.statusCode, 401);
 
-  // garbage ticket → 401
+  // garbage ticket â†’ 401
   const bad = await app.inject({ method: "GET", url: "/api/v1/events?ticket=garbage" });
   assert.equal(bad.statusCode, 401);
 
@@ -481,6 +481,34 @@ test("G-12 DISPATCH IDEMPOTENCY: same key returns original execution", async () 
   assert.equal((execs.body.items as unknown[]).length, 1); // exactly one execution
 });
 
+test("AUTHZ: revoked API key is rejected immediately", async () => {
+  const k = new AuthService(ctx.db).createKey(ctx.defaultOrgId(), "revocable", "ENGINEER");
+  const okBefore = await api("GET", "/api/v1/projects", undefined, k.keyMaterial);
+  assert.equal(okBefore.status, 200);
+
+  ctx.db.run("UPDATE api_keys SET revoked_at = ? WHERE id = ?", [ctx.db.now(), k.id]);
+  const afterRevocation = await api("GET", "/api/v1/projects", undefined, k.keyMaterial);
+  assert.equal(afterRevocation.status, 401);
+});
+
+test("APPROVAL RACE: concurrent decisions â€” exactly one wins", async () => {
+  const resId = `race-${Date.now()}`;
+  const apr = await api("POST", "/api/v1/approvals", {
+    action: "release:merge",
+    resourceType: "release",
+    resourceId: resId,
+    reason: "race",
+    riskLevel: "high",
+  });
+  assert.equal(apr.status, 201);
+
+  const results = await Promise.all([
+    api("POST", `/api/v1/approvals/${apr.body.id}/decide`, { decision: "approve" }),
+    api("POST", `/api/v1/approvals/${apr.body.id}/decide`, { decision: "reject" }),
+  ]);
+  const codes = results.map((r) => r.status).sort();
+  assert.deepEqual(codes, [200, 409]); // one decision lands, the other conflicts
+});
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {
   ctx.db.driver.close(); // simulate database loss
   const r = await app.inject({ method: "GET", url: "/ready" });
@@ -488,3 +516,4 @@ test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAS
   const body = r.json() as { error?: { code?: string } };
   assert.equal(body.error?.code, "DEPENDENCY_UNAVAILABLE");
 });
+

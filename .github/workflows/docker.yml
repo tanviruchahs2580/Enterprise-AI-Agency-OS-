@@ -1,0 +1,119 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: build · run · smoke · persist · scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build control-plane image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.control-plane
+          push: false
+          load: true
+          tags: agencyos-control-plane:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start PostgreSQL service container
+        run: |
+          docker run -d --name pg \
+            -e POSTGRES_USER=agency -e POSTGRES_PASSWORD=cipw -e POSTGRES_DB=agencyos \
+            -p 5432:5432 --health-cmd "pg_isready -U agency" \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U agency && break
+            sleep 1
+          done
+
+      - name: Run control-plane against Postgres (migrations auto-apply)
+        run: |
+          docker run -d --name cp --network host \
+            -e NODE_ENV=staging \
+            -e HOST=0.0.0.0 -e PORT=3000 \
+            -e DATABASE_URL=postgres://agency:cipw@127.0.0.1:5432/agencyos \
+            -e ADMIN_BOOTSTRAP_KEY=ci-smoke-key \
+            -e SANDBOX_PROVIDER=process \
+            agencyos-control-plane:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3000/health && break
+            sleep 1
+          done
+
+      - name: Smoke — health / ready / auth / metrics / persistence
+        run: |
+          set -e
+          curl -fsS http://127.0.0.1:3000/health | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:3000/ready | grep -q '"database":"ok"'
+          # authenticated write lands in Postgres
+          curl -fsS -X POST http://127.0.0.1:3000/api/v1/projects \
+            -H "authorization: Bearer ci-smoke-key" \
+            -H "content-type: application/json" \
+            -d '{"name":"docker-smoke"}' | grep -q '"id":"prj_'
+          # unauthenticated request rejected
+          ! curl -fsS http://127.0.0.1:3000/api/v1/projects
+          # prometheus metrics served
+          curl -fsS http://127.0.0.1:3000/metrics | grep -q 'agencyos_http_requests_total'
+          echo "smoke OK"
+
+      - name: Restart test — data survives container recreation
+        run: |
+          set -e
+          docker rm -f cp
+          docker run -d --name cp2 --network host \
+            -e NODE_ENV=staging \
+            -e HOST=0.0.0.0 -e PORT=3000 \
+            -e DATABASE_URL=postgres://agency:cipw@127.0.0.1:5432/agencyos \
+            -e ADMIN_BOOTSTRAP_KEY=ci-smoke-key \
+            -e SANDBOX_PROVIDER=process \
+            agencyos-control-plane:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3000/ready >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000/api/v1/projects \
+            -H "authorization: Bearer ci-smoke-key" | grep -q 'docker-smoke'
+          echo "persistence across restart OK"
+
+      - name: Non-root user verification
+        run: |
+          USER_OUT=$(docker exec cp2 whoami)
+          echo "container user: $USER_OUT"
+          [ "$USER_OUT" = "agency" ] || { echo "expected non-root user 'agency'"; exit 1; }
+
+      - name: Container log inspection (no secrets leaked)
+        run: |
+          LOGS=$(docker logs cp2 2>&1)
+          echo "$LOGS" | grep -q "control plane listening"
+          if echo "$LOGS" | grep -qi "ci-smoke-key"; then
+            echo "FAIL: admin key found in container logs"; exit 1
+          fi
+          echo "no secret leakage in logs"
+
+      - name: Trivy image scan (critical/high gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: agencyos-control-plane:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f cp cp2 pg 2>/dev/null || true

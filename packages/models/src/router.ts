@@ -135,10 +135,24 @@ export class ModelRouter {
       });
     }
 
+    // Context-window guard: skip candidates whose window cannot hold the
+    // request; if none can, fail safely with CONTEXT_OVERFLOW (no silent
+    // truncation, no provider round-trip).
+    const fits = limited.filter((c) => estTokens <= c.model.contextWindow);
+    if (fits.length === 0) {
+      this.record(requestId, traceId, req.requestedModel ?? "-", "-", "-", "context_overflow",
+        constraints.tier ?? "STANDARD", Date.now() - started, 0, 0, 0, 0, 0,
+        "failed", "CONTEXT_OVERFLOW", started);
+      throw new AppError("VALIDATION_ERROR",
+        `request exceeds every candidate model context window (~${estTokens} tokens)`,
+        { details: { requestId, estimatedTokens: estTokens } });
+    }
+    const candidates = fits;
+
     let fallbackCount = 0;
     let lastError: unknown;
 
-    for (const cand of limited) {
+    for (const cand of candidates) {
       const breakerKey = `${cand.provider.info.id}:${cand.model.modelId}`;
       const breaker = this.breaker(breakerKey);
       try {

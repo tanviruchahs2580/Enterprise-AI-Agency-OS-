@@ -232,3 +232,23 @@ test("G-05: parallel workers cannot claim the same job (no double execution)", a
   );
   assert.equal(Number(dupes!.n), 8);
 });
+
+test("G-05b: high-concurrency claim proof (12 workers × 24 jobs)", async () => {
+  const q = new JobQueue(db, { pollMs: 2 });
+  let executions = 0;
+  q.register("bulk", async () => {
+    executions++;
+    await new Promise((r) => setTimeout(r, 5));
+  });
+  for (let i = 0; i < 24; i++) {
+    q.enqueue({ orgId, type: "bulk", data: { i } });
+  }
+  // simulate 12 concurrent workers repeatedly pulling
+  async function worker(): Promise<void> {
+    while (await q.processOne()) {
+      /* keep pulling */
+    }
+  }
+  await Promise.all(Array.from({ length: 12 }, () => worker()));
+  assert.equal(executions, 24);
+});

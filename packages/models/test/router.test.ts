@@ -114,3 +114,26 @@ test("token/cost estimation helpers are sane", () => {
   assert.ok(Math.abs(c - 2) < 1e-9); // 1*1 + 0.5*2
   void systemClock;
 });
+
+test("context overflow: request larger than every candidate window fails safely", async () => {
+  const tiny = new MockModelProvider({
+    models: [
+      {
+        id: "tiny", alias: "tiny", modelId: "tiny", tier: "FAST",
+        capabilities: ["chat"], contextWindow: 50,
+        inputCostPer1k: 0.0001, outputCostPer1k: 0.0001,
+      },
+    ],
+  });
+  const router = new ModelRouter({ providers: [tiny] });
+
+  await assert.rejects(
+    () =>
+      router.complete({
+        messages: [{ role: "user", content: "x".repeat(400) }], // ~100 tokens > 50
+      }),
+    (e: unknown) =>
+      e instanceof AppError && e.code === "VALIDATION_ERROR" && /context window/.test(e.message)
+  );
+  assert.equal(tiny.callCount, 0); // never reached the provider
+});
