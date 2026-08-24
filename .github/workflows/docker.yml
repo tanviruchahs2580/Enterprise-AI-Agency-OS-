@@ -51,10 +51,14 @@ jobs:
             -e ADMIN_BOOTSTRAP_KEY=ci-smoke-key \
             -e SANDBOX_PROVIDER=process \
             agencyos-control-plane:ci
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:3000/health && break
+          UP=false
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3000/health; then UP=true; echo; break; fi
             sleep 1
           done
+          echo "--- container logs ---"
+          docker logs cp || true
+          [ "$UP" = "true" ] || { echo "control plane failed to start"; exit 1; }
 
       - name: Smoke — health / ready / auth / metrics / persistence
         run: |
