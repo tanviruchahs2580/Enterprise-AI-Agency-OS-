@@ -110,11 +110,12 @@ export class BudgetGuardImpl implements BudgetGuard {
       return Number(row?.total ?? 0);
     }
     if (scopeType === "org") {
+      // Portable 30-day window (ISO string comparison; no SQL date functions).
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
       const row = this.db.get<{ total: number | null }>(
         `SELECT SUM(amount_usd) AS total FROM cost_events
-         WHERE org_id = ? AND scope_type = 'org' AND scope_id = ?
-           AND created_at >= date('now', '-30 days')`,
-        [scopes.orgId, scopeId]
+         WHERE org_id = ? AND scope_type = 'org' AND scope_id = ? AND created_at >= ?`,
+        [scopes.orgId, scopeId, cutoff]
       );
       return Number(row?.total ?? 0);
     }

@@ -1,18 +1,27 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import { AppError } from "@agency/core";
+import { AppError, sha256Hex, newToken } from "@agency/core";
 import type { Identity } from "./auth.ts";
 import { AuthService } from "./auth.ts";
 import type { AppContext } from "./context.ts";
+import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 
-const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta"]);
+const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics"]);
 
 interface RateBucket {
   count: number;
   windowStart: number;
 }
 
+/** One-time, short-TTL tickets so EventSource never carries the API key. */
+interface SseTicket {
+  identity: Identity;
+  expiresAt: number;
+}
+
 export function buildApp(ctx: AppContext): FastifyInstance {
   const auth = new AuthService(ctx.db);
+  const metrics = new MetricsRegistry();
+  const sseTickets = new Map<string, SseTicket>();
 
   const app = Fastify({
     logger: false,
@@ -26,28 +35,48 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const url = req.url.split("?")[0] ?? req.url;
     if (PUBLIC_PATHS.has(url)) return;
 
-    // rate limiting (per key or IP)
-    const bucketKey =
-      (req.headers.authorization?.slice(0, 16)) ??
-      req.ip;
+    const header = req.headers.authorization;
+    let token: string | undefined;
+    let sseTicket: string | undefined;
+    if (header?.startsWith("Bearer ")) {
+      token = header.slice(7);
+    } else if (url === "/api/v1/events") {
+      // EventSource cannot send headers; clients exchange the API key for a
+      // one-time short-TTL ticket (POST /api/v1/events/ticket) first.
+      sseTicket = new URLSearchParams(req.url.split("?")[1] ?? "").get("ticket") ?? undefined;
+    }
+
+    const identity = sseTicket ? consumeSseTicket(sseTicket) : auth.authenticate(token);
+    (req as FastifyRequest & { identity?: Identity }).identity = identity;
+
+    // Identity-aware rate buckets: hash(keyId|ip) — collision-resistant,
+    // tenant-safe, and stable across routes (GAP G-07).
     enforceRateLimit(
-      bucketKey,
+      sha256Hex(`${identity.keyId}|${req.ip}`).slice(0, 24),
       ctx.config.RATE_LIMIT_WINDOW_MS,
       ctx.config.RATE_LIMIT_MAX
     );
 
-    const header = req.headers.authorization;
-    let token: string | undefined;
-    if (header?.startsWith("Bearer ")) {
-      token = header.slice(7);
-    } else if (url === "/api/v1/events") {
-      // EventSource cannot send headers; allow ?auth= for SSE clients.
-      token = new URLSearchParams(req.url.split("?")[1] ?? "").get("auth") ?? undefined;
-    }
-    const identity = auth.authenticate(token);
-    (req as FastifyRequest & { identity?: Identity }).identity = identity;
-
     void reply;
+  });
+
+  function consumeSseTicket(ticket: string): Identity {
+    const entry = sseTickets.get(ticket);
+    if (!entry) throw new AppError("UNAUTHENTICATED", "invalid or expired SSE ticket");
+    sseTickets.delete(ticket); // single-use
+    if (Date.now() > entry.expiresAt) {
+      throw new AppError("UNAUTHENTICATED", "SSE ticket expired");
+    }
+    return entry.identity;
+  }
+
+  app.addHook("onResponse", async (req, reply) => {
+    const url = req.url.split("?")[0] ?? req.url;
+    if (PUBLIC_PATHS.has(url)) return;
+    metrics.observeHttp(
+      { route: metricsRouteLabel(url), method: req.method, status: reply.statusCode },
+      reply.elapsedTime
+    );
   });
 
   app.addHook("onError", async (_req, _reply, err: Error) => {
@@ -428,6 +457,48 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { ok: true };
   });
 
+  // ---------- reviews ----------
+  app.post("/api/v1/tasks/:id/reviews", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:update");
+    const { id } = req.params as { id: string };
+    const task = ctx.db.get("SELECT id FROM tasks WHERE id=? AND org_id=?", [id, me.orgId]);
+    if (!task) throw new AppError("NOT_FOUND", "task not found");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["verdict"]);
+    const axes = ["standards", "spec", "security", "adversarial"];
+    const axis = String(body.axis ?? "standards");
+    if (!axes.includes(axis)) throw new AppError("VALIDATION_ERROR", `axis must be one of ${axes.join(",")}`);
+    const verdicts = ["pass", "fail", "changes_requested"];
+    const verdict = String(body.verdict);
+    if (!verdicts.includes(verdict)) throw new AppError("VALIDATION_ERROR", `verdict must be one of ${verdicts.join(",")}`);
+    const rid = cryptoRandomId("rev");
+    ctx.db.insert("reviews", {
+      id: rid, org_id: me.orgId, task_id: id,
+      reviewer_agent_id: body.reviewerAgentId ? String(body.reviewerAgentId) : null,
+      axis, verdict,
+      findings: JSON.stringify(body.findings ?? []),
+      score: body.score !== undefined ? Number(body.score) : null,
+      created_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "review.recorded", "review", rid, "low", { taskId: id, verdict });
+    publishEvent(ctx, me.orgId, me, "ReviewRecorded", { reviewId: rid, taskId: id, verdict });
+    reply.code(201);
+    return { id: rid };
+  });
+
+  app.get("/api/v1/tasks/:id/reviews", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const { id } = req.params as { id: string };
+    return {
+      items: ctx.db.all(
+        "SELECT * FROM reviews WHERE org_id=? AND task_id=? ORDER BY created_at DESC LIMIT 50",
+        [me.orgId, id]
+      ),
+    };
+  });
+
   // ---------- executions (dispatch) ----------
   app.post("/api/v1/executions", async (req, reply) => {
     const me = ident(req);
@@ -440,6 +511,19 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     ]);
     if (!task) throw new AppError("NOT_FOUND", "task not found");
 
+    // Client-supplied idempotency: same key returns the original execution (GAP G-12).
+    const idemKey = body.idempotencyKey ? String(body.idempotencyKey) : null;
+    if (idemKey) {
+      const existing = ctx.db.get<{ response_hash: string }>(
+        "SELECT response_hash FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?",
+        [me.orgId, "execution.dispatch", idemKey]
+      );
+      if (existing) {
+        reply.code(200);
+        return JSON.parse(String(existing.response_hash)) as Record<string, unknown>;
+      }
+    }
+
     const execId = cryptoRandomId("exe");
     const traceId = cryptoRandomId("trc");
     ctx.db.insert("executions", {
@@ -451,6 +535,19 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       trace_id: traceId,
       created_at: ctx.db.now(),
     });
+    if (idemKey) {
+      const dup = ctx.db.get("SELECT id FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?", [
+        me.orgId, "execution.dispatch", idemKey,
+      ]);
+      if (!dup) {
+        ctx.db.insert("idempotency_keys", {
+          id: cryptoRandomId("idk"), org_id: me.orgId,
+          scope: "execution.dispatch", key: idemKey,
+          response_hash: JSON.stringify({ executionId: execId, traceId, status: "queued" }),
+          created_at: ctx.db.now(),
+        });
+      }
+    }
     ctx.jobs.enqueue({
       orgId: me.orgId,
       type: "execute_task",
@@ -795,6 +892,23 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const me = ident(req);
     auth.requirePermission(me, "audit:verify");
     return ctx.audit.verify(me.orgId);
+  });
+
+  app.get("/metrics", async () => {
+    // Prometheus text format — no auth (contains no tenant data), standard scrape target.
+    return metrics.render(ctx);
+  });
+
+  // ---------- SSE ticket exchange ----------
+  app.post("/api/v1/events/ticket", async (req, reply) => {
+    const me = ident(req);
+    const ticket = newToken(24);
+    sseTickets.set(ticket, {
+      identity: me,
+      expiresAt: Date.now() + 60_000, // single-use, 60s window
+    });
+    reply.code(201);
+    return { ticket, expiresInSeconds: 60 };
   });
 
   // ---------- SSE event stream ----------

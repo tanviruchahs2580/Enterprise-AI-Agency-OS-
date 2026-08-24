@@ -155,6 +155,21 @@ export class JobQueue {
     return true;
   }
 
+  /**
+   * Reclaim jobs whose worker died mid-run (GAP G-04): any 'running' job with
+   * a lock older than `olderThanMs` goes back to 'pending' for retry.
+   * Safe under concurrency — conditional UPDATE only flips matching rows.
+   */
+  reclaimStale(olderThanMs = 10 * 60_000): number {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const res = this.db.driver.run(
+      `UPDATE jobs SET status = 'pending', updated_at = ?
+       WHERE status = 'running' AND locked_at IS NOT NULL AND locked_at < ?`,
+      [this.db.now(), cutoff]
+    );
+    return Number(res.changes);
+  }
+
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
@@ -166,11 +181,17 @@ export class JobQueue {
   }
 
   private async loop(): Promise<void> {
+    let sinceReclaim = 0;
     while (this.running) {
       let processed = 0;
       for (let i = 0; i < this.concurrency; i++) {
         const did = await this.processOne();
         if (did) processed++;
+      }
+      // Periodically reclaim crashed-worker jobs (every ~60s of idle loops).
+      if (Date.now() - sinceReclaim > 60_000) {
+        this.reclaimStale();
+        sinceReclaim = Date.now();
       }
       if (processed === 0) await sleep(this.pollMs);
     }

@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createRequire } from "node:module";
 
 export type Row = Record<string, unknown>;
 type SqlParams = Parameters<StatementSync["run"]>;
@@ -12,8 +13,8 @@ export interface RunResult {
 
 /**
  * Driver abstraction so the platform is not bound to one engine (ADR-0004).
- * SQLite implementation ships in-process via node:sqlite; a PostgreSQL driver
- * implements the same surface for production multi-writer deployments.
+ * SQLite implementation ships in-process via node:sqlite; the PostgreSQL
+ * driver implements the same synchronous surface for production deployments.
  */
 export interface DatabaseDriver {
   readonly kind: "sqlite" | "postgres";
@@ -76,18 +77,13 @@ export class SqliteDriver implements DatabaseDriver {
 /** Resolve a driver from a DATABASE_URL-style string. */
 export function openDatabase(url: string): DatabaseDriver {
   if (url.startsWith("postgres://") || url.startsWith("postgresql://")) {
-    // PostgreSQL driver requires optional dependency 'pg' installed at runtime.
-    throw new AppErrorPostgresNotInstalled();
+    // Lazy require keeps `pg` loadable only for PostgreSQL deployments.
+    const require = createRequire(import.meta.url);
+    type PgDriverModule = {
+      PostgresDriver: new (url: string, maxPool?: number) => DatabaseDriver;
+    };
+    const mod = require("./pgdriver.ts") as PgDriverModule;
+    return new mod.PostgresDriver(url);
   }
   return new SqliteDriver(url);
-}
-
-class AppErrorPostgresNotInstalled extends Error {
-  constructor() {
-    super(
-      "PostgreSQL support requires the optional 'pg' package and a reachable server. " +
-        "Install it (`npm i pg`) and ensure DATABASE_URL points to a live Postgres instance."
-    );
-    this.name = "PostgresNotInstalled";
-  }
 }

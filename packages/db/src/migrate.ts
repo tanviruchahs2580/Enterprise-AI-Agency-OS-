@@ -30,6 +30,24 @@ function loadMigrationFiles(): { version: number; name: string; sql: string; che
 }
 
 /**
+ * Dialect translation: the canonical schema is written in the SQLite dialect.
+ * For PostgreSQL we apply a small, auditable set of rewrites (GAP G-01):
+ *   - drop PRAGMA lines (SQLite-only)
+ *   - AUTOINCREMENT integer PKs → BIGSERIAL
+ */
+export function translateForPostgres(sql: string): string {
+  return sql
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*PRAGMA\b/i.test(line))
+    .join("\n")
+    .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, "BIGSERIAL PRIMARY KEY");
+}
+
+function migrationSql(m: { sql: string }, kind: "sqlite" | "postgres"): string {
+  return kind === "postgres" ? translateForPostgres(m.sql) : m.sql;
+}
+
+/**
  * Versioned, checksum-verified migration runner.
  * - Applied migrations are never re-run; checksum drift is a hard error (tamper detection).
  * - Each migration runs inside a transaction.
@@ -59,8 +77,9 @@ export function migrate(db: DatabaseDriver): AppliedMigration[] {
       }
       continue;
     }
+    const sql = migrationSql(m, db.kind);
     db.transaction(() => {
-      db.exec(m.sql);
+      db.exec(sql);
       db.run(
         "INSERT INTO _migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)",
         [m.version, m.name, m.checksum, new Date().toISOString()]

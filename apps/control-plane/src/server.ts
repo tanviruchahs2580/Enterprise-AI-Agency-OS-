@@ -1,6 +1,7 @@
 import { buildContext } from "./context.ts";
 import { buildApp } from "./app.ts";
 import { registerWorkers } from "./workers.ts";
+import { sweepExpiredApprovals } from "./sweeper.ts";
 
 async function main(): Promise<void> {
   const ctx = buildContext();
@@ -30,6 +31,16 @@ async function main(): Promise<void> {
   registerWorkers(ctx);
   await ctx.jobs.start();
 
+  // Approval expiry sweeper (GAP G-03) — deterministic, auditable, idempotent.
+  const sweeper = setInterval(() => {
+    try {
+      const n = sweepExpiredApprovals(ctx.db, ctx.audit);
+      if (n > 0) ctx.log.info("expired approvals swept", { count: n });
+    } catch (e) {
+      ctx.log.error("approval sweeper failed", { error: String(e) });
+    }
+  }, 60_000);
+
   const app = buildApp(ctx);
   try {
     await app.listen({ port: ctx.config.PORT, host: ctx.config.HOST });
@@ -46,6 +57,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     ctx.log.info("shutting down", { signal });
+    clearInterval(sweeper);
     ctx.jobs.stop();
     await app.close();
     process.exit(0);

@@ -5,3 +5,4 @@ export * from "./sandbox.ts";
 export * from "./jobs.ts";
 export * from "./registry.ts";
 export * from "./workflow.ts";
+export * from "./worktree.ts";

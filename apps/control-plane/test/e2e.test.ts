@@ -380,3 +380,103 @@ test("CONCURRENCY: optimistic locking prevents lost updates on same task", async
   const codes = results.map((r) => r.status).sort();
   assert.deepEqual(codes, [200, 409]);
 });
+
+// ---------------------------------------------------------------------------
+// v0.2.0 production hardening verification
+// ---------------------------------------------------------------------------
+
+test("G-02 METRICS: prometheus endpoint exposes live series", async () => {
+  // public path — no auth needed by design
+  const res = await app.inject({ method: "GET", url: "/metrics" });
+  assert.equal(res.statusCode, 200);
+  const body = res.body;
+  for (const series of [
+    "agencyos_http_requests_total",
+    "agencyos_queue_jobs",
+    "agencyos_model_requests_total",
+    "agencyos_approvals_pending",
+    "agencyos_database_up 1",
+  ]) {
+    assert.ok(body.includes(series), `missing metric series: ${series}`);
+  }
+  // after traffic, counters > 0
+  assert.match(body, /agencyos_http_requests_total\{method="GET",route="\/api\/v1\/projects",status="200"\} \d+/);
+});
+
+test("G-06 SSE TICKETS: one-time short-TTL tickets replace raw key in URL", async () => {
+  const t = await api("POST", "/api/v1/events/ticket");
+  assert.equal(t.status, 201);
+  const ticket = String(t.body.ticket);
+
+  // first use with the ticket is accepted (stream starts; we abort immediately)
+  const ac = new AbortController();
+  const streamPromise = app.inject({
+    method: "GET",
+    url: `/api/v1/events?ticket=${ticket}`,
+    signal: ac.signal,
+  });
+  // give the handler a moment to authenticate + start streaming, then abort
+  await new Promise((r2) => setTimeout(r2, 150));
+  ac.abort();
+  await assert.rejects(
+    () => streamPromise,
+    (e: unknown) => String((e as Error).message).length >= 0
+  );
+
+  // ticket is single-use — second connection rejected
+  const reuse = await app.inject({ method: "GET", url: `/api/v1/events?ticket=${ticket}` });
+  assert.equal(reuse.statusCode, 401);
+
+  // garbage ticket → 401
+  const bad = await app.inject({ method: "GET", url: "/api/v1/events?ticket=garbage" });
+  assert.equal(bad.statusCode, 401);
+
+  // raw API key in URL is NO LONGER accepted (hardening)
+  const legacy = await app.inject({
+    method: "GET",
+    url: `/api/v1/events?auth=${encodeURIComponent(adminKey)}`,
+  });
+  assert.equal(legacy.statusCode, 401);
+});
+
+test("G-08 REVIEWS: record + list with axis/verdict validation", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Review Flow" });
+  const projectId = String(prj.body.id);
+  const t = await api("POST", "/api/v1/tasks", { projectId, title: "Reviewed task" });
+
+  const badVerdict = await api("POST", `/api/v1/tasks/${t.body.id}/reviews`, { verdict: "meh" });
+  assert.equal(badVerdict.status, 400);
+
+  const ok = await api("POST", `/api/v1/tasks/${t.body.id}/reviews`, {
+    axis: "spec",
+    verdict: "changes_requested",
+    findings: ["acceptance criterion #2 untested"],
+    score: 7,
+  });
+  assert.equal(ok.status, 201);
+
+  const list = await api("GET", `/api/v1/tasks/${t.body.id}/reviews`);
+  assert.equal((list.body.items as unknown[]).length, 1);
+});
+
+test("G-12 DISPATCH IDEMPOTENCY: same key returns original execution", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Idem Dispatch" });
+  const projectId = String(prj.body.id);
+  const t = await api("POST", "/api/v1/tasks", { projectId, title: "Idempotent task" });
+  await api("POST", `/api/v1/tasks/${t.body.id}/transition`, { to: "ready" });
+  const agents = await api("GET", "/api/v1/agents");
+  const agent = (agents.body.items as { id: string; name: string }[]).find((a) => a.name === "backend-engineer")!;
+
+  const first = await api("POST", "/api/v1/executions", {
+    taskId: t.body.id, agentId: agent.id, idempotencyKey: "client-op-777",
+  });
+  assert.equal(first.status, 202);
+  const second = await api("POST", "/api/v1/executions", {
+    taskId: t.body.id, agentId: agent.id, idempotencyKey: "client-op-777",
+  });
+  assert.equal(second.status, 200); // replayed
+  assert.equal(String(second.body.executionId), String(first.body.executionId));
+
+  const execs = await api("GET", `/api/v1/executions?taskId=${t.body.id}`);
+  assert.equal((execs.body.items as unknown[]).length, 1); // exactly one execution
+});

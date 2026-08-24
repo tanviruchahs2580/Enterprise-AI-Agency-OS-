@@ -185,3 +185,50 @@ test("workflow without handler blocks; resume after fix continues", async () => 
   assert.equal(r.status, "running");
   assert.equal(r.currentStage, "architecture");
 });
+
+// ---------------------------------------------------------------------------
+// Production hardening regressions (v0.2.0)
+// ---------------------------------------------------------------------------
+
+test("G-04: stale running jobs are reclaimed; fresh locks untouched", async () => {
+  const q = new JobQueue(db, { pollMs: 5 });
+  const past = new Date(Date.now() - 30 * 60_000).toISOString();
+  const fresh = db.now();
+  driver.run(
+    `INSERT INTO jobs (id, org_id, queue, job_type, payload, status, run_after, attempts, max_attempts, locked_by, locked_at, created_at, updated_at)
+     VALUES ('job_old', ?, 'default', 'noop', '{}', 'running', ?, 1, 5, 'dead-worker', ?, ?, ?)`,
+    [orgId, fresh, past, fresh, fresh]
+  );
+  driver.run(
+    `INSERT INTO jobs (id, org_id, queue, job_type, payload, status, run_after, attempts, max_attempts, locked_by, locked_at, created_at, updated_at)
+     VALUES ('job_fresh', ?, 'default', 'noop', '{}', 'running', ?, 1, 5, 'live-worker', ?, ?, ?)`,
+    [orgId, fresh, fresh, fresh, fresh]
+  );
+
+  const reclaimed = q.reclaimStale(10 * 60_000);
+  assert.equal(reclaimed, 1);
+  const oldRow = db.get<{ status: string }>("SELECT status FROM jobs WHERE id='job_old'");
+  const freshRow = db.get<{ status: string }>("SELECT status FROM jobs WHERE id='job_fresh'");
+  assert.equal(String(oldRow!.status), "pending");
+  assert.equal(String(freshRow!.status), "running");
+});
+
+test("G-05: parallel workers cannot claim the same job (no double execution)", async () => {
+  const q = new JobQueue(db, { pollMs: 5 });
+  let executions = 0;
+  q.register("counted", async () => {
+    executions++;
+    await new Promise((r) => setTimeout(r, 20)); // widen the race window
+  });
+  for (let i = 0; i < 8; i++) {
+    q.enqueue({ orgId, type: "counted", data: { n: i } });
+  }
+  // two workers racing on the same queue
+  await Promise.all([q.processOne(), q.processOne(), q.processOne(), q.processOne()]);
+  while (await q.processOne()) { /* drain */ }
+  assert.equal(executions, 8); // exactly once each — never duplicated
+  const dupes = db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM jobs WHERE status='succeeded'"
+  );
+  assert.equal(Number(dupes!.n), 8);
+});

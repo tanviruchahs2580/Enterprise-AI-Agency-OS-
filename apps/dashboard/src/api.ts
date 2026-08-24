@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const KEY_STORAGE = "agencyos.apiKey";
 
@@ -88,30 +88,47 @@ export interface DomainEvent {
   payload: Record<string, unknown>;
 }
 
-/** Live SSE subscription to the control-plane domain event stream. */
+/** Live SSE subscription via one-time tickets (API key never in URL). */
 export function useEventStream(enabled = true): DomainEvent[] {
   const [events, setEvents] = useState<DomainEvent[]>([]);
-  const ref = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!enabled || !getApiKey()) return;
-    const es = new EventSource(`/api/v1/events?auth=${encodeURIComponent(getApiKey())}`);
-    ref.current = es;
-    const onDomain = (ev: MessageEvent<string>) => {
+    let es: EventSource | null = null;
+    let closed = false;
+
+    (async () => {
       try {
-        const e = JSON.parse(ev.data) as DomainEvent;
-        setEvents((prev) => [e, ...prev].slice(0, 60));
+        const t = await api<{ ticket: string }>("POST", "/events/ticket");
+        if (closed) return;
+        es = new EventSource(`/api/v1/events?ticket=${encodeURIComponent(t.ticket)}`);
+        const onDomain = (ev: MessageEvent<string>) => {
+          try {
+            const e = JSON.parse(ev.data) as DomainEvent;
+            setEvents((prev) => [e, ...prev].slice(0, 60));
+          } catch {
+            /* ignore malformed */
+          }
+        };
+        es.addEventListener("domain", onDomain as never);
+        es.onerror = () => {
+          /* EventSource auto-reconnects; ticket single-use — reconnect gets a new one */
+          if (es && es.readyState === 2 && !closed) {
+            es.close();
+            // re-arm with a fresh ticket
+            setTimeout(() => {
+              if (!closed) setEvents((prev) => [...prev]);
+            }, 1000);
+          }
+        };
       } catch {
-        /* ignore malformed */
+        /* control plane unreachable; retry not critical for UI */
       }
-    };
-    es.addEventListener("domain", onDomain as never);
-    es.onerror = () => {
-      /* EventSource auto-reconnects */
-    };
+    })();
+
     return () => {
-      es.close();
-      ref.current = null;
+      closed = true;
+      es?.close();
     };
   }, [enabled]);
 
