@@ -2,6 +2,17 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.3.0 — production certification cycle (2026-08-25)
+- [x] Docker validation unblocked via CI: docker.yml (build/run/smoke/persist/
+      non-root/log-leak/Trivy scan) — runs on every push & PR
+- [x] Load test 10→100 concurrent: PASS (p95 ≤182ms, 614 RPS, rate-limiter
+      proven as designed backpressure)
+- [x] PG extended validation 7/7 (cross-session locks, txn rollback, bad creds)
+- [x] Context-window guard, revoked-key + approval-race regressions
+- [x] Admin key no longer logged in full (security fix)
+- [x] Grafana dashboards x4 + Prometheus alert rules
+- [x] Certification command + report; UAT matrix A–L; runbooks completed
+
 ## v0.2.0 — final production hardening & deployment (2026-08-24)
 - [x] GAP matrix executed: docs/FINAL-PRODUCTION-GAP-MATRIX.md
 - [x] PostgreSQL driver LIVE-VERIFIED on PG 16.4 portable instance

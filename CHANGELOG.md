@@ -2,6 +2,38 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.3.0] — 2026-08-25
+
+### Added — production certification cycle
+- **Docker CI gate** (`docker.yml`): builds control-plane image on GitHub
+  Actions, boots it against a Postgres service container, runs health/ready/
+  auth/metrics smoke + **persistence-across-restart** check + non-root user
+  verification + log secret-leak scan + **Trivy critical/high image scan**.
+  Resolves the previously BLOCKED local container validation via automation.
+- **Production certification command** `scripts/production-certify.mjs` —
+  executes every runnable mandatory gate and emits
+  `docs/PRODUCTION-CERTIFICATION-REPORT.md` with honest PASS/FAIL/BLOCKED.
+- **Load test** `scripts/load-test.mjs`: progressive 10→100 concurrency;
+  verified p95 ≤182ms, 0 errors at every stage (~614 RPS); HTTP 429 reported
+  separately as designed backpressure (default limiter proven working).
+- **PG extended validation** `scripts/verify-pg-extended.ts` (7 checks incl.
+  cross-session optimistic locking, transaction rollback, bad credentials).
+- **Observability definitions**: Grafana dashboards (executive/engineering/
+  AI-cost/operations) + Prometheus alert rules with documented thresholds
+  (`infrastructure/observability/`).
+- Runbooks: INCIDENT-RESPONSE, SECURITY-RUNBOOK; ENTERPRISE-UAT scenario
+  matrix A–L mapped to executed evidence.
+
+### Security
+- Control plane no longer logs the full admin API key (fingerprint only);
+  auto-generated key printed once to stderr outside production.
+- Revoked-key rejection covered by regression test.
+
+### Fixed
+- Model router: requests exceeding every candidate context window now fail
+  fast with CONTEXT_OVERFLOW before any provider call.
+- Dependabot blocked from TypeScript majors (typescript-eslint peer conflict).
+
 ## [0.2.0] — 2026-08-24
 
 ### Added — production infrastructure (all live- or integration-verified)
