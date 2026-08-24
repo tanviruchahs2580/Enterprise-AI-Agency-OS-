@@ -2,6 +2,44 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.2.0] — 2026-08-24
+
+### Added — production infrastructure (all live- or integration-verified)
+- **PostgreSQL driver**: synchronous bridge over `pg` (worker-thread, SAB
+  result transfer), SQLite-style `?` → `$n` placeholder translation, portable
+  migration runner. Live drill: migrate → idempotent re-run → CRUD →
+  optimistic locking → FK integrity → full API smoke on PG 16.4.
+- **Prometheus `/metrics`** (dependency-free): HTTP counters + duration
+  histogram, queue depth by status, model requests/fallbacks/cost,
+  execution states, approvals pending, database-up, build info.
+- **Approval sweeper**: expired pending approvals flip to `expired` every 60s
+  with hash-chained audit events; idempotent under concurrency.
+- **Stale-job reclaim**: worker-crash locks requeued after 10 minutes; loop
+  integrates periodic reclaim.
+- **Reviews API**: `POST/GET /api/v1/tasks/:id/reviews` with axis/verdict
+  validation and audit linkage.
+- **Git worktree isolation loop**: namespaced branches, dirty-tree protection,
+  intent-to-add diffs, commit→merge→cleanup (integration tests vs real git).
+- **Dispatch idempotency keys**: client retries replay the original response.
+- Runbooks: DEPLOYMENT-RUNBOOK, ROLLBACK-RUNBOOK, OPERATIONS-RUNBOOK;
+  FINAL-PRODUCTION-GAP-MATRIX, FINAL-PRODUCTION-READINESS-REPORT,
+  FINAL-PRODUCTION-RELEASE-REPORT.
+
+### Security
+- SSE hardening: raw API keys rejected in URLs; one-time 60s tickets
+  (`POST /api/v1/events/ticket`) feed EventSource clients.
+- Rate-limit buckets keyed by hashed identity+IP (collision-resistant).
+
+### Fixed
+- Bridge init payload write skipped → PG connect hung.
+- Placeholder mismatch silently sent to pg → explicit count validation.
+- Route-label cardinality collapsed resource names in metrics.
+- Double driver close threw on shutdown paths.
+
+### Verified
+55/55 tests · coverage 90.8/82.5 · clean-env bootstrap drill · perf p95 17.7ms
+(no regression) · backup/restore fresh drill · GitHub CI/security/release green.
+
 ## [0.1.1] — 2026-08-24
 
 ### Fixed (post-build verification pass — all with regression tests)

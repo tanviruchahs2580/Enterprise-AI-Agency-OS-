@@ -480,3 +480,11 @@ test("G-12 DISPATCH IDEMPOTENCY: same key returns original execution", async () 
   const execs = await api("GET", `/api/v1/executions?taskId=${t.body.id}`);
   assert.equal((execs.body.items as unknown[]).length, 1); // exactly one execution
 });
+
+test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {
+  ctx.db.driver.close(); // simulate database loss
+  const r = await app.inject({ method: "GET", url: "/ready" });
+  assert.equal(r.statusCode, 503);
+  const body = r.json() as { error?: { code?: string } };
+  assert.equal(body.error?.code, "DEPENDENCY_UNAVAILABLE");
+});

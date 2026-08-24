@@ -2,6 +2,19 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.2.0 — final production hardening & deployment (2026-08-24)
+- [x] GAP matrix executed: docs/FINAL-PRODUCTION-GAP-MATRIX.md
+- [x] PostgreSQL driver LIVE-VERIFIED on PG 16.4 portable instance
+      (migrate/idempotent/CRUD/optimistic-lock/FK + full API smoke)
+- [x] Prometheus /metrics live-served (14 series)
+- [x] SSE one-time tickets; raw key in URL → 401 (regression-tested)
+- [x] Approval sweeper (60s, audited) · stale-job reclaim · 4-way claim race proof
+- [x] Reviews API · worktree isolation loop (real git) · dispatch idempotency
+- [x] Restart-recovery & DB-failure readiness regressions
+- [x] Clean-env clone drill PASS · perf p95 17.7ms (no regression) · backup/restore PASS
+- [x] Runbooks + readiness/release reports published
+- [x] Verdict: PRODUCTION READY WITH DOCUMENTED LIMITATIONS (95/100)
+
 ## Post-build verification & hardening (2026-08-24)
 - [x] Independent re-validation: 43/43 tests, coverage 90.9/80.6, lint/typecheck clean
 - [x] 4 real defects found & fixed with regression tests:

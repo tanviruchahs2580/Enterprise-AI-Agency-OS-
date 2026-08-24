@@ -28,7 +28,7 @@ export interface DatabaseDriver {
 
 export class SqliteDriver implements DatabaseDriver {
   readonly kind = "sqlite" as const;
-  private db: InstanceType<typeof DatabaseSync>;
+  private db: InstanceType<typeof DatabaseSync> | null;
 
   constructor(file: string) {
     if (file !== ":memory:") {
@@ -41,20 +41,20 @@ export class SqliteDriver implements DatabaseDriver {
   }
 
   exec(sql: string): void {
-    this.db.exec(sql);
+    this.db!.exec(sql);
   }
 
   run(sql: string, params: unknown[] = []): RunResult {
-    const res = this.db.prepare(sql).run(...(params as SqlParams));
+    const res = this.db!.prepare(sql).run(...(params as SqlParams));
     return { changes: res.changes, lastInsertRowid: Number(res.lastInsertRowid) };
   }
 
   all(sql: string, params: unknown[] = []): Row[] {
-    return this.db.prepare(sql).all(...(params as SqlParams)) as Row[];
+    return this.db!.prepare(sql).all(...(params as SqlParams)) as Row[];
   }
 
   get(sql: string, params: unknown[] = []): Row | undefined {
-    return this.db.prepare(sql).get(...(params as SqlParams)) as Row | undefined;
+    return this.db!.prepare(sql).get(...(params as SqlParams)) as Row | undefined;
   }
 
   transaction<T>(fn: () => T): T {
@@ -70,7 +70,10 @@ export class SqliteDriver implements DatabaseDriver {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      this.db.close();
+      this.db = null; // idempotent — double close is a no-op
+    }
   }
 }
 
