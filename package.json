@@ -30,5 +30,10 @@
   },
   "allowScripts": {
     "esbuild@0.21.5": true
+  },
+  "overrides": {
+    "brace-expansion@1": ">=1.1.16",
+    "brace-expansion@2": ">=2.1.2",
+    "brace-expansion": ">=5.0.7"
   }
 }
