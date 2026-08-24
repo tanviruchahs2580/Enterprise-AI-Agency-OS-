@@ -4,11 +4,21 @@ FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Install production dependencies only (lockfile-pinned, reproducible)
+# 1) Manifests first so dependency install is a cached layer.
+#    Workspace package.json files must exist for npm ci to link workspaces.
 COPY package.json package-lock.json ./
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/security/package.json packages/security/
+COPY packages/models/package.json packages/models/
+COPY packages/orchestration/package.json packages/orchestration/
+COPY packages/integrations/package.json packages/integrations/
+COPY apps/control-plane/package.json apps/control-plane/
+
+# 2) Install production dependencies only (lockfile-pinned, reproducible)
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-# Copy workspace sources
+# 3) Sources
 COPY packages ./packages
 COPY apps/control-plane ./apps/control-plane
 COPY scripts ./scripts
