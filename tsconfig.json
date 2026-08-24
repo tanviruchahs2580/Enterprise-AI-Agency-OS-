@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/db" },
+    { "path": "packages/security" },
+    { "path": "packages/models" },
+    { "path": "packages/orchestration" },
+    { "path": "packages/integrations" },
+    { "path": "apps/control-plane" }
+  ]
+}
