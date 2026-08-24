@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The control plane exposes process metrics via its health endpoints;
+  # a dedicated /metrics endpoint with prom-client is on the ROADMAP (v0.2).
+  - job_name: agencyos-control-plane
+    metrics_path: /health
+    static_configs:
+      - targets: ["control-plane:3000"]

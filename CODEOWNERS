@@ -1,0 +1,6 @@
+# Code owners — reviews required for sensitive areas (master prompt §14/§96)
+*                       @tanviruchahs2580
+/packages/security/     @tanviruchahs2580
+/packages/db/           @tanviruchahs2580
+/.github/workflows/     @tanviruchahs2580
+/docker/                @tanviruchahs2580
