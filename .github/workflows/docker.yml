@@ -131,7 +131,7 @@ jobs:
           # (/usr/lib/node_modules/npm) which is not used by the app at runtime.
           # App dependencies under /app are fully covered.
           trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
-            --skip-dirs /usr/lib/node_modules/npm \
+            --skip-dirs /usr/local/lib/node_modules/npm \
             agencyos-control-plane:ci
 
       - name: Trivy full-image scan (informational)
