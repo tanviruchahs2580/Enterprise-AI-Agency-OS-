@@ -198,3 +198,185 @@ test("knowledge search returns real matches only", async () => {
   const miss = await api("GET", "/api/v1/knowledge/search?q=zzznotfoundzzz");
   assert.equal((miss.body.items as unknown[]).length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Post-build verification additions
+// ---------------------------------------------------------------------------
+
+test("TENANT ISOLATION: organization B cannot access organization A resources", async () => {
+  // provision tenant B as the OWNER identity
+  const orgB = await api("POST", "/api/v1/organizations", { name: "Beta Corp" });
+  assert.equal(orgB.status, 201);
+  const keyB = String(orgB.body.ownerKey);
+  assert.ok(keyB.length > 20);
+
+  // duplicate slug rejected
+  const dupOrg = await api("POST", "/api/v1/organizations", { name: "beta corp" });
+  assert.equal(dupOrg.status, 409);
+
+  // B creates its own project
+  const prjB = await api("POST", "/api/v1/projects", { name: "Secret Beta Project" }, keyB);
+  assert.equal(prjB.status, 201);
+  const projectIdB = String(prjB.body.id);
+  const taskIdB = await api("POST", "/api/v1/tasks", { projectId: projectIdB, title: "B-only task" }, keyB);
+  assert.equal(taskIdB.status, 201);
+  await api("POST", "/api/v1/knowledge", {
+    kind: "fact", title: "beta secret", content: "only beta knows this",
+  }, keyB);
+
+  // A cannot read B's project / tasks / knowledge
+  const aReadsB = await api("GET", `/api/v1/projects/${projectIdB}`);
+  assert.equal(aReadsB.status, 404);
+  const aTasksB = await api("GET", `/api/v1/tasks?projectId=${projectIdB}`);
+  assert.equal(aTasksB.status, 200);
+  assert.equal((aTasksB.body.items as unknown[]).length, 0); // scoped out
+  const aKnowledge = await api("GET", "/api/v1/knowledge/search?q=beta+secret");
+  const leaked = (aKnowledge.body.items as { title: string }[]).filter(
+    (k) => k.title === "beta secret"
+  );
+  assert.equal(leaked.length, 0);
+
+  // B cannot see A's data either
+  const bProjects = await api("GET", "/api/v1/projects", undefined, keyB);
+  const namesB = (bProjects.body.items as { name: string }[]).map((p) => p.name);
+  assert.equal(namesB.filter((n) => n === "Billing Service").length, 0);
+});
+
+test("WORKER EXECUTION: dispatch → job → model → artifact → cost → transition", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Exec Flow" });
+  const projectId = String(prj.body.id);
+  const task = await api("POST", "/api/v1/tasks", { projectId, title: "Plan the invoice module" });
+  const ready = await api("POST", `/api/v1/tasks/${task.body.id}/transition`, { to: "ready" });
+  assert.equal(ready.status, 200);
+
+  // find backend engineer from seeded roster
+  const agents = await api("GET", "/api/v1/agents");
+  const agent = (agents.body.items as { id: string; name: string }[]).find((a) => a.name === "backend-engineer")!;
+
+  const disp = await api("POST", "/api/v1/executions", { taskId: task.body.id, agentId: agent.id });
+  assert.equal(disp.status, 202);
+  const executionId = String(disp.body.executionId);
+
+  // drive the queue deterministically
+  const processed = await ctx.jobs.processOne();
+  assert.equal(processed, true);
+
+  const execs = await api("GET", `/api/v1/executions?taskId=${task.body.id}`);
+  const exec = (execs.body.items as { id: string; status: string; output_summary?: string }[]).find(
+    (e) => e.id === executionId
+  )!;
+  assert.equal(exec.status, "succeeded");
+  assert.match(String(exec.output_summary), /mock-/);
+
+  // artifact persisted
+  const artifacts = ctx.db.all("SELECT kind, name FROM artifacts WHERE execution_id = ?", [executionId]);
+  assert.equal(artifacts.length, 1);
+  assert.equal(String(artifacts[0]!.kind), "plan");
+
+  // handoff knowledge document persisted (executionId recorded in tags)
+  const handoffs = ctx.db.all(
+    "SELECT id FROM knowledge_documents WHERE kind='handoff' AND tags LIKE ?",
+    [`%${executionId}%`]
+  );
+  assert.equal(handoffs.length, 1);
+
+  // cost recorded at multiple scopes
+  const costs = ctx.db.all(
+    "SELECT DISTINCT scope_type FROM cost_events WHERE reason LIKE ?",
+    [`%${executionId}%`]
+  );
+  const scopes = costs.map((c) => String(c.scope_type)).sort();
+  assert.deepEqual(scopes, ["daily", "monthly", "org", "project", "task"]);
+
+  // task advanced into implementation state
+  const taskRow = ctx.db.get<{ status: string }>("SELECT status FROM tasks WHERE id = ?", [
+    String(task.body.id),
+  ]);
+  assert.equal(String(taskRow!.status), "in_progress");
+});
+
+test("ROLLBACK: corrective deployment recorded and original marked rolled_back", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Rollback Flow" });
+  const projectId = String(prj.body.id);
+  const dep = await api("POST", "/api/v1/deployments", {
+    projectId, environment: "staging", version: "2.0.0", commitSha: "cafebabe",
+  });
+  assert.equal(dep.status, 202);
+  await api("POST", `/api/v1/deployments/${dep.body.id}/succeed`);
+
+  const rb = await api("POST", `/api/v1/deployments/${dep.body.id}/rollback`);
+  assert.equal(rb.status, 202);
+  const list = await api("GET", "/api/v1/deployments");
+  const items = list.body.items as { id: string; status: string; version: string; rollback_of: string | null }[];
+  const original = items.find((d) => d.id === dep.body.id)!;
+  assert.equal(original.status, "rolled_back");
+  const corrective = items.find((d) => d.rollback_of === dep.body.id)!;
+  assert.equal(corrective.version, "2.0.0-rollback");
+
+  // audit trail contains the rollback event
+  const audit = await api("GET", "/api/v1/audit?limit=50");
+  const actions = (audit.body.items as { action: string }[]).map((a) => a.action);
+  assert.ok(actions.includes("deployment.rollback_started"));
+});
+
+test("APPROVAL TIMEOUT: expired request cannot be decided and gate stays closed", async () => {
+  const resId = crypto.randomUUID();
+  const apr = await api("POST", "/api/v1/approvals", {
+    action: "deploy:staging",
+    resourceType: "deployment",
+    resourceId: resId,
+    reason: "expiring quickly",
+    riskLevel: "medium",
+    ttlMinutes: 0,
+  });
+  assert.equal(apr.status, 201);
+  await new Promise((r) => setTimeout(r, 10));
+
+  const decided = await api("POST", `/api/v1/approvals/${apr.body.id}/decide`, { decision: "approve" });
+  assert.equal(decided.status, 409);
+  const err = decided.body.error as { message?: string };
+  assert.match(String(err.message), /expired/);
+
+  // gate remains closed — APPROVAL_REQUIRED surfaces as HTTP 202 by design
+  const dep = await api("POST", "/api/v1/deployments", {
+    projectId: resId, environment: "production", version: "9.9.9", commitSha: "ff",
+  });
+  assert.equal(dep.status, 202);
+  const depErr = dep.body.error as { code?: string };
+  assert.equal(depErr.code, "APPROVAL_REQUIRED");
+});
+
+test("MISSIONS & WORKSTREAMS lifecycle endpoints", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Mission Control" });
+  const projectId = String(prj.body.id);
+
+  const mis = await api("POST", "/api/v1/missions", {
+    projectId, title: "Q4 Billing Launch", objective: "Ship invoicing GA", budgetUsd: 500,
+  });
+  assert.equal(mis.status, 201);
+
+  const ws = await api("POST", "/api/v1/workstreams", {
+    projectId, missionId: mis.body.id, name: "Payments Core",
+  });
+  assert.equal(ws.status, 201);
+
+  const misList = await api("GET", `/api/v1/missions?projectId=${projectId}`);
+  assert.equal((misList.body.items as unknown[]).length, 1);
+  const wsList = await api("GET", `/api/v1/workstreams?projectId=${projectId}`);
+  assert.equal((wsList.body.items as unknown[]).length, 1);
+});
+
+test("CONCURRENCY: optimistic locking prevents lost updates on same task", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Race" });
+  const projectId = String(prj.body.id);
+  const t = await api("POST", "/api/v1/tasks", { projectId, title: "Contended" });
+  const id = String(t.body.id);
+
+  // two concurrent transitions to 'ready' — exactly one wins at DB level
+  const results = await Promise.all([
+    api("POST", `/api/v1/tasks/${id}/transition`, { to: "ready" }),
+    api("POST", `/api/v1/tasks/${id}/transition`, { to: "ready" }),
+  ]);
+  const codes = results.map((r) => r.status).sort();
+  assert.deepEqual(codes, [200, 409]);
+});

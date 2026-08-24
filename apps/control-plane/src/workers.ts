@@ -8,7 +8,12 @@ import type { AppContext } from "./context.ts";
  */
 export function registerWorkers(ctx: AppContext): void {
   ctx.jobs.register("execute_task", async (job) => {
-    const executionId = String((job.payload as { executionId: string }).executionId);
+    // payload shape (set by enqueue): { orgId, type, data: { executionId } }
+    const data = (job.payload as { data?: { executionId?: string } }).data ?? {};
+    const executionId = String(data.executionId ?? "");
+    if (!executionId) {
+      throw new Error("execute_task job missing executionId in payload");
+    }
     const exec = ctx.db.get<{
       id: string;
       org_id: string;
@@ -102,11 +107,18 @@ export function registerWorkers(ctx: AppContext): void {
         tokens_out: completion.usage.tokensOut,
         cost_usd: completion.estimatedCostUsd,
       });
-      if (task.status === "planned" || task.status === "ready") {
-        try {
+      // Advance task through its legal lifecycle (ready→planned→in_progress).
+      const current = ctx.db.get<{ status: string }>(
+        "SELECT status FROM tasks WHERE id = ?",
+        [exec.task_id]
+      );
+      const st = String(current?.status ?? "");
+      try {
+        if (st === "ready") ctx.tasks.transition(exec.task_id, "planned");
+        if (st === "ready" || st === "planned") {
           ctx.tasks.transition(exec.task_id, "in_progress");
-        } catch { /* state moved on */ }
-      }
+        }
+      } catch { /* concurrent state change — execution result still recorded */ }
       publish(ctx, exec.org_id, "AgentFinished", {
         executionId,
         status: "succeeded",

@@ -35,6 +35,16 @@ export class MockModelProvider implements ModelProvider {
         outputCostPer1k: 0.0002,
       },
       {
+        id: "mock-standard",
+        alias: "mock-standard",
+        modelId: "mock-standard",
+        tier: "STANDARD",
+        capabilities: ["chat", "tools", "json", "code"],
+        contextWindow: 128_000,
+        inputCostPer1k: 0.0005,
+        outputCostPer1k: 0.001,
+      },
+      {
         id: "mock-reasoning",
         alias: "mock-reasoning",
         modelId: "mock-reasoning",

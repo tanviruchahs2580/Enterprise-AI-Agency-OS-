@@ -1,6 +1,20 @@
 # PROGRESS
 
-Live status ledger. Updated after every stage.
+Live status ledger. Updated after every phase.
+
+## Post-build verification & hardening (2026-08-24)
+- [x] Independent re-validation: 43/43 tests, coverage 90.9/80.6, lint/typecheck clean
+- [x] 4 real defects found & fixed with regression tests:
+      worker payload bug (would dead-letter all dispatches), falsy-zero approval TTL,
+      ready→in_progress state-machine gap, missing STANDARD mock tier
+- [x] Tenant isolation proven: organizations API + cross-org e2e
+- [x] Worker pipeline e2e: dispatch→artifact→handoff→cost(5 scopes)→transition
+- [x] Rollback + approval-timeout + concurrency e2e added
+- [x] Backup→restore executed and row-verified
+- [x] Performance baseline captured: p50 15ms / p95 17ms / p99 20ms
+- [x] Security: prod audit 0 vulns; react-router upgraded to 7.18.2; gitleaks CI green
+- [x] Phase-44 report set published (12 documents with real evidence)
+- [x] Verdict: PRODUCTION READY WITH MINOR RISKS (89/100)
 
 ## Completed
 - [x] Environment & repository audit (docs/BUILD-AUDIT.md) — 13 blueprint gaps identified & addressed

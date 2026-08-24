@@ -124,6 +124,108 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     docs: "/docs",
   }));
 
+  // ---------- organizations & tenancy ----------
+  app.post("/api/v1/organizations", async (req, reply) => {
+    // Authenticated OWNER-level identities may provision new tenants.
+    const me = ident(req);
+    auth.requirePermission(me, "settings:write");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["name"]);
+    const slug = slugify(String(body.slug ?? body.name));
+    if (ctx.db.get("SELECT id FROM organizations WHERE slug = ?", [slug])) {
+      throw new AppError("CONFLICT", `organization slug '${slug}' already exists`);
+    }
+    const id = cryptoRandomId("org");
+    const now = ctx.db.now();
+    ctx.db.insert("organizations", {
+      id, name: String(body.name), slug,
+      created_at: now, updated_at: now,
+    });
+    const key = auth.createKey(id, `${slug}-owner`, "OWNER");
+    ctx.agents.seedRoster(id);
+    auditEvent(ctx, me, "organization.created", "organization", id, "critical", { slug });
+    publishEvent(ctx, id, me, "OrganizationCreated", { organizationId: id, slug });
+    reply.code(201);
+    return { id, slug, ownerKey: key.keyMaterial };
+  });
+
+  app.get("/api/v1/organizations", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    return {
+      items: ctx.db.all(
+        "SELECT id, name, slug, created_at FROM organizations WHERE id = ?",
+        [me.orgId]
+      ),
+    };
+  });
+
+  // ---------- missions ----------
+  app.post("/api/v1/missions", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "mission:create");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["projectId", "title", "objective"]);
+    ensureProject(ctx, me.orgId, String(body.projectId));
+    const id = cryptoRandomId("mis");
+    const now = ctx.db.now();
+    ctx.db.insert("missions", {
+      id, org_id: me.orgId, project_id: String(body.projectId),
+      title: String(body.title), objective: String(body.objective),
+      status: "draft",
+      budget_usd: Number(body.budgetUsd ?? 0),
+      spent_usd: 0,
+      created_by: me.userId,
+      created_at: now, updated_at: now,
+    });
+    auditEvent(ctx, me, "mission.created", "mission", id, "low");
+    reply.code(201);
+    return { id };
+  });
+
+  app.get("/api/v1/missions", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const q = req.query as { projectId?: string };
+    const params: unknown[] = [me.orgId];
+    let sql = "SELECT * FROM missions WHERE org_id = ?";
+    if (q.projectId) { sql += " AND project_id = ?"; params.push(q.projectId); }
+    sql += " ORDER BY created_at DESC LIMIT 100";
+    return { items: ctx.db.all(sql, params) };
+  });
+
+  // ---------- workstreams ----------
+  app.post("/api/v1/workstreams", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:create");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["projectId", "name"]);
+    ensureProject(ctx, me.orgId, String(body.projectId));
+    const id = cryptoRandomId("ws");
+    const now = ctx.db.now();
+    ctx.db.insert("workstreams", {
+      id, org_id: me.orgId, project_id: String(body.projectId),
+      mission_id: body.missionId ? String(body.missionId) : null,
+      name: String(body.name),
+      description: String(body.description ?? ""),
+      status: "active",
+      created_at: now, updated_at: now,
+    });
+    reply.code(201);
+    return { id };
+  });
+
+  app.get("/api/v1/workstreams", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const q = req.query as { projectId?: string };
+    const params: unknown[] = [me.orgId];
+    let sql = "SELECT * FROM workstreams WHERE org_id = ?";
+    if (q.projectId) { sql += " AND project_id = ?"; params.push(q.projectId); }
+    sql += " ORDER BY created_at DESC LIMIT 100";
+    return { items: ctx.db.all(sql, params) };
+  });
+
   // ---------- projects ----------
   app.post("/api/v1/projects", async (req, reply) => {
     const me = ident(req);
@@ -461,7 +563,8 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       reason: String(body.reason),
       riskLevel: String(body.riskLevel) as never,
       requestedBy: me.userId,
-      ttlMinutes: body.ttlMinutes ? Number(body.ttlMinutes) : 60,
+      // explicit zero/negative TTL must win over the default (falsy-zero bug)
+      ttlMinutes: body.ttlMinutes !== undefined ? Number(body.ttlMinutes) : 60,
     });
     publishEvent(ctx, me.orgId, me, "ApprovalRequested", { approvalId: r.id, action: body.action });
     reply.code(201);

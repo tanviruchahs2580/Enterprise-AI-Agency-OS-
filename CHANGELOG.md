@@ -2,6 +2,37 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.1.1] — 2026-08-24
+
+### Fixed (post-build verification pass — all with regression tests)
+- **control-plane**: worker read execution id from the wrong payload nesting level;
+  every dispatched execution would have retried into dead-letter.
+- **security**: approval `ttlMinutes=0` silently became the 60-minute default
+  (falsy-zero), making expiry unenforceable through the API.
+- **orchestration/control-plane**: worker attempted the illegal
+  ready→in_progress transition and swallowed the error, leaving tasks stuck;
+  now advances ready→planned→in_progress per the lifecycle.
+- **models**: default provider set lacked a STANDARD-tier model, so standard-tier
+  agent dispatches failed candidate selection.
+
+### Added
+- Organizations API (`POST/GET /api/v1/organizations`) with owner-key issuance
+  and roster seeding; cross-tenant isolation covered by new e2e suite.
+- Missions & workstreams endpoints; deployment rollback e2e; approval-expiry e2e;
+  concurrent-transition (optimistic-lock) e2e.
+- Performance baseline harness (`scripts/perf-baseline.mjs`).
+- Phase-44 verification report set (12 docs incl. security audit, failure-injection,
+  performance, readiness score).
+
+### Security
+- react-router-dom upgraded 6.26 → 7.18.2 (open-redirect advisories).
+- Production dependency audit: 0 vulnerabilities; esbuild dev-server advisory
+  documented as accepted dev-only risk.
+
+### Verified
+- Coverage 90.86% line / 80.56% branch · perf p95 ≤ 17.6ms · backup/restore drill ·
+  GitHub CI matrix + security + release workflows green.
+
 ## [0.1.0] — 2026-08-24
 
 ### Added
