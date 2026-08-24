@@ -120,14 +120,21 @@ jobs:
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
           trivy --version
 
-      - name: Verify no vulnerable app dependencies shipped
+      - name: Install Trivy CLI
         run: |
-          # npm's own VENDORED copy lives under /usr/lib/node_modules/npm and is
-          # not used by the application at runtime; we scan /app only.
-          trivy rootfs --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
-            --scanners vuln,secret /app
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
 
-      - name: Trivy full-image OS scan (informational report)
+      - name: Trivy app-dependency scan (critical/high gate)
+        run: |
+          # Scan the whole image EXCLUDING npm's own vendored tree
+          # (/usr/lib/node_modules/npm) which is not used by the app at runtime.
+          # App dependencies under /app are fully covered.
+          trivy image --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            --skip-dirs /usr/lib/node_modules/npm \
+            agencyos-control-plane:ci
+
+      - name: Trivy full-image scan (informational)
         run: |
           trivy image --severity CRITICAL,HIGH --exit-code 0 agencyos-control-plane:ci
 
