@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -b tsconfig.json",
+    "typecheck": "tsc -b tsconfig.json && tsc -p apps/dashboard --noEmit",
     "test": "node --test \"packages/**/test/*.test.ts\" \"apps/control-plane/test/*.test.ts\"",
     "build": "npm run build --workspaces --if-present",
     "dev": "node scripts/dev.mjs",
@@ -27,5 +27,8 @@
     "eslint": "^9.33.0",
     "typescript-eslint": "^8.40.0",
     "typescript": "^5.9.2"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
   }
 }

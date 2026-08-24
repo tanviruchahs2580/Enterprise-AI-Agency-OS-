@@ -37,7 +37,13 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     );
 
     const header = req.headers.authorization;
-    const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+    let token: string | undefined;
+    if (header?.startsWith("Bearer ")) {
+      token = header.slice(7);
+    } else if (url === "/api/v1/events") {
+      // EventSource cannot send headers; allow ?auth= for SSE clients.
+      token = new URLSearchParams(req.url.split("?")[1] ?? "").get("auth") ?? undefined;
+    }
     const identity = auth.authenticate(token);
     (req as FastifyRequest & { identity?: Identity }).identity = identity;
 
