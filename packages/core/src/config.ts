@@ -15,10 +15,18 @@ const Int = (def: number) =>
     .transform((v) => (v === undefined || v === "" ? def : Number.parseInt(v, 10)))
     .refine((n) => Number.isFinite(n) && n > 0, "must be a positive integer");
 
+/** Port allows 0 (ephemeral) for tests. */
+const Port = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? def : Number.parseInt(v, 10)))
+    .refine((n) => Number.isInteger(n) && n >= 0 && n <= 65535, "must be a valid port");
+
 export const configSchema = z.object({
   NODE_ENV: z.enum(["local", "test", "staging", "production"]).default("local"),
   HOST: z.string().default("127.0.0.1"),
-  PORT: Int(3000),
+  PORT: Port(3000),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DATABASE_URL: z.string().default("./data/agencyos.sqlite"),
   /** Comma-separated origins; "*" allowed only for non-production. */

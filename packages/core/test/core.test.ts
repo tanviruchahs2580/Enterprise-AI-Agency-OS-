@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { newId, sha256Hex, canonicalJson, newToken } from "../src/ids.ts";
+import { newId, sha256Hex, canonicalJson } from "../src/ids.ts";
 import { AppError } from "../src/errors.ts";
 import { EventBus } from "../src/events.ts";
 import { createLogger } from "../src/logger.ts";

@@ -1,5 +1,5 @@
 import { newToken } from "@agency/core";
-import type { CompletionRequest, ModelDescriptor, ModelProvider, ProviderInfo } from "./types.ts";
+import type { CompletionRequest, ModelDescriptor, ModelProvider, ProviderInfo } from "../types.ts";
 
 /**
  * Deterministic mock provider for tests and offline development.
@@ -23,29 +23,29 @@ export class MockModelProvider implements ModelProvider {
       baseUrl: "internal://mock",
       priority: 1000,
     };
-    this.models =
-      opts?.models ?? [
-        {
-          id: "mock-fast",
-          alias: "mock-fast",
-          modelId: "mock-fast",
-          tier: "FAST",
-          capabilities: ["chat", "json"],
-          contextWindow: 32_000,
-          inputCostPer1k: 0.0001,
-          outputCostPer1k: 0.0002,
-        },
-        {
-          id: "mock-reasoning",
-          alias: "mock-reasoning",
-          modelId: "mock-reasoning",
-          tier: "REASONING",
-          capabilities: ["chat", "tools", "code", "json"],
-          contextWindow: 200_000,
-          inputCostPer1k: 0.001,
-          outputCostPer1k: 0.002,
-        },
-      ];
+    const defaults: ModelDescriptor[] = [
+      {
+        id: "mock-fast",
+        alias: "mock-fast",
+        modelId: "mock-fast",
+        tier: "FAST",
+        capabilities: ["chat", "json"],
+        contextWindow: 32_000,
+        inputCostPer1k: 0.0001,
+        outputCostPer1k: 0.0002,
+      },
+      {
+        id: "mock-reasoning",
+        alias: "mock-reasoning",
+        modelId: "mock-reasoning",
+        tier: "REASONING",
+        capabilities: ["chat", "tools", "code", "json"],
+        contextWindow: 200_000,
+        inputCostPer1k: 0.001,
+        outputCostPer1k: 0.002,
+      },
+    ];
+    this.models = opts?.models ?? defaults;
   }
 
   /** Test hook: make the next N complete() calls throw. */

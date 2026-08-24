@@ -1,8 +1,9 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type Row = Record<string, unknown>;
+type SqlParams = Parameters<StatementSync["run"]>;
 
 export interface RunResult {
   changes: number | bigint;
@@ -43,16 +44,16 @@ export class SqliteDriver implements DatabaseDriver {
   }
 
   run(sql: string, params: unknown[] = []): RunResult {
-    const res = this.db.prepare(sql).run(...params);
+    const res = this.db.prepare(sql).run(...(params as SqlParams));
     return { changes: res.changes, lastInsertRowid: Number(res.lastInsertRowid) };
   }
 
   all(sql: string, params: unknown[] = []): Row[] {
-    return this.db.prepare(sql).all(...params) as Row[];
+    return this.db.prepare(sql).all(...(params as SqlParams)) as Row[];
   }
 
   get(sql: string, params: unknown[] = []): Row | undefined {
-    return this.db.prepare(sql).get(...params) as Row | undefined;
+    return this.db.prepare(sql).get(...(params as SqlParams)) as Row | undefined;
   }
 
   transaction<T>(fn: () => T): T {

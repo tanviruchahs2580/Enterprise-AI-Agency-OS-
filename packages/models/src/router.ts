@@ -13,6 +13,7 @@ import { defaultPolicy, estimateCost, estimateTokens } from "./types.ts";
 
 export interface RouterRecord {
   requestId: string;
+  traceId: string;
   requestedModel: string | null;
   selectedModel: string;
   provider: string;
@@ -81,7 +82,7 @@ export class ModelRouter {
   select(constraints: RoutingConstraints): Candidate[] {
     const wantedTier = constraints.tier;
     const caps = new Set(constraints.requiredCapabilities ?? []);
-    let cands: Candidate[] = [];
+    const cands: Candidate[] = [];
     for (const p of this.opts.providers) {
       if (this.health.get(p.info.id) === false) continue;
       for (const m of p.models) {
@@ -127,8 +128,8 @@ export class ModelRouter {
       (req.maxTokens ?? 1024);
     const estCost = limited[0]!.model.outputCostPer1k * (estTokens / 1000);
     if (this.opts.budget && !this.opts.budget.allowSpend(estCost)) {
-      const rec = this.record(requestId, traceId, req.requestedModel, "-", "-", null,
-        constraints.tier ?? "STANDARD", 0, 0, 0, 0, 0, "budget_blocked", "BUDGET_EXCEEDED", started);
+      const rec = this.record(requestId, traceId, req.requestedModel ?? "-", "-", "-", null,
+        constraints.tier ?? "STANDARD", 0, 0, 0, 0, 0, 0, "budget_blocked", "BUDGET_EXCEEDED", started);
       throw new AppError("BUDGET_EXCEEDED", "estimated cost exceeds available budget", {
         details: { estimatedUsd: estCost, requestId: rec.requestId },
       });

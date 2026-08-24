@@ -1,5 +1,5 @@
 import { AppError } from "@agency/core";
-import type { CompletionRequest, ModelDescriptor, ModelProvider, ProviderInfo } from "./types.ts";
+import type { CompletionRequest, ModelDescriptor, ModelProvider, ProviderInfo } from "../types.ts";
 
 /**
  * Provider for any OpenAI-compatible /chat/completions endpoint:

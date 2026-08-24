@@ -380,7 +380,7 @@ CREATE INDEX idx_model_requests_org_time ON model_requests(org_id, created_at);
 CREATE TABLE cost_events (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES organizations(id),
-  scope_type TEXT NOT NULL CHECK (scope_type IN ('request','task','mission','project','org','global')),
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('request','task','mission','project','org','daily','monthly','global')),
   scope_id TEXT NOT NULL,
   amount_usd REAL NOT NULL,
   reason TEXT NOT NULL,

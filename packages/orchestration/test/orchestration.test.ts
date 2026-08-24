@@ -6,7 +6,7 @@ import { canTransition, assertTransition } from "../src/statemachine.ts";
 import { JobQueue } from "../src/jobs.ts";
 import { AgentRegistry } from "../src/registry.ts";
 import { WorkflowEngine, defaultWorkflowDefinition } from "../src/workflow.ts";
-import { assertCommandSafe, ProcessSandbox } from "../src/sandbox.ts";
+import { ProcessSandbox } from "../src/sandbox.ts";
 import { AppError } from "@agency/core";
 
 let driver: SqliteDriver;
@@ -93,25 +93,25 @@ test("job queue: idempotency, retry with backoff, dead-letter, requeue", async (
   assert.equal(j1.id, j1b.id);
 
   await q.processOne();
-  const doneRow = db.get<{ status: string }>("SELECT status FROM jobs WHERE id = ?", [j1.id]);
+  const doneRow = db.get<{ status?: string }>("SELECT status FROM jobs WHERE id = ?", [j1.id]);
   assert.equal(String(doneRow!.status), "succeeded");
 
   // flaky job fails → backoff pending
   const j2 = q.enqueue({ orgId, type: "flaky", data: {}, maxAttempts: 2 });
   await q.processOne();
-  let row = db.get<{ status: string; last_error: string }>("SELECT status, last_error FROM jobs WHERE id = ?", [j2.id]);
+  let row = db.get<{ status?: string; last_error?: string | null }>("SELECT status, last_error FROM jobs WHERE id = ?", [j2.id]);
   assert.equal(String(row!.status), "pending"); // retried later
   assert.match(String(row!.last_error), /boom-1/);
 
   // force due and fail again → dead_letter
   driver.run("UPDATE jobs SET run_after = ? WHERE id = ?", [db.now(), j2.id]);
   await q.processOne();
-  row = db.get<{ status: string }>("SELECT status FROM jobs WHERE id = ?", [j2.id]);
+  row = db.get<{ status?: string }>("SELECT status FROM jobs WHERE id = ?", [j2.id]);
   assert.equal(String(row!.status), "dead_letter");
 
   // requeue from DLQ works
   q.retryDeadLetter(j2.id);
-  row = db.get<{ status: string; attempts: number }>("SELECT status, attempts FROM jobs WHERE id = ?", [j2.id]);
+  row = db.get<{ status?: string; attempts?: number }>("SELECT status, attempts FROM jobs WHERE id = ?", [j2.id]);
   assert.equal(String(row!.status), "pending");
 });
 
@@ -175,7 +175,7 @@ test("workflow without handler blocks; resume after fix continues", async () => 
 
   // requirements has no handler yet → blocked
   await assert.rejects(() => engine.advance(run.runId), /no handler/);
-  let state = engine.getState(orgId, run.runId);
+  const state = engine.getState(orgId, run.runId);
   assert.equal(String(state.status), "blocked");
 
   // handler appears; resume continues from requirements
