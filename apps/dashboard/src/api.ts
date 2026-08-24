@@ -74,7 +74,6 @@ export function useApi<T>(path: string, deps: unknown[] = []): {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, tick, ...deps]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);

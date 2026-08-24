@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, useApi } from "../api.ts";
+import { useApi } from "../api.ts";
 import { Badge, Empty, ErrorBox, Loading, Panel, fmtTime } from "../ui.tsx";
 
 interface KnowledgeDoc {
