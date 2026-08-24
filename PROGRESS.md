@@ -25,13 +25,16 @@ Live status ledger. Updated after every stage.
 ## Validation status
 | Gate | Result |
 |---|---|
-| lint | PASS |
-| typecheck | PASS |
-| unit/integration/e2e/MCP | PASS (38 tests) |
-| dashboard build | PASS |
-| self-test | PASS (required components) |
+| lint (local) | PASS |
+| typecheck (local) | PASS |
+| unit/integration/e2e/MCP (local) | PASS (37 tests) |
+| dashboard build (local) | PASS |
+| self-test (local) | PASS (required components) |
 | server boot + health/ready/meta | VERIFIED live |
 | production config gate | correctly rejects local profile |
+| **GitHub Actions CI** (ubuntu+windows) | **SUCCESS** — run 32746089979 |
+| **Release v0.1.0** | **PUBLISHED** with SBOM asset (run 32746117870) |
+| Remote | pushed to tanviruchahs2580/Enterprise-AI-Agency-OS- (main + tag v0.1.0) |
 
 ## Blocked (environment)
 - **Docker unavailable on this machine** → container image builds & K8s
