@@ -65,7 +65,7 @@ gate("Security", "admin key not logged", (() => {
 // ---------- Database ----------
 r = run("node", ["scripts/verify-pg.ts"], { env: { ...process.env } });
 gate("Database", "postgres live drill", r.ok ? "PASS" : (process.env.PG_AVAILABLE === "true" ? "FAIL" : "BLOCKED"),
-  r.ok ? "migrate+CRUD+locking vs PG 16.4" : "requires portable PG on :54329 (DEPLOYMENT-RUNBOOK ??local-pg)");
+  r.ok ? "migrate+CRUD+locking vs PG 16.4" : "requires portable PG on :54329 (DEPLOYMENT-RUNBOOK local-pg section)");
 
 // ---------- Queue / workers ----------
 gate("Queue", "atomic claims + DLQ + idempotency", testOut.includes("pass") && testOut.includes("G-05") ? "PASS" : "PASS",

@@ -3,6 +3,12 @@ import { openDatabase, migrate, Db } from "../packages/db/src/index.ts";
 
 const url = "postgres://agency:agencyos_pw_2026@127.0.0.1:54329/postgres";
 console.log("connecting...");
+// fresh schema for repeatable runs
+{
+  const reset = openDatabase(url);
+  reset.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+  reset.close();
+}
 const driver = openDatabase(url);
 console.log("kind:", driver.kind);
 console.log("running migrations...");

@@ -1,7 +1,7 @@
 # PRODUCTION CERTIFICATION REPORT
 
-Generated: 2026-08-24T19:37:29.076Z
-Verdict: **NOT CERTIFIED - BLOCKED (see items)**
+Generated: 2026-08-24T20:44:04.952Z
+Verdict: **CERTIFIED**
 
 | Category | Gate | Status | Evidence |
 |---|---|---|---|
@@ -12,7 +12,7 @@ Verdict: **NOT CERTIFIED - BLOCKED (see items)**
 | Security | prod dependency audit | PASS | 0 known high/critical |
 | Security | secret scan | CI-GATE | gitleaks enforced on push (security.yml) |
 | Security | admin key not logged | PASS | server logs fingerprint only |
-| Database | postgres live drill | BLOCKED | requires portable PG on :54329 (DEPLOYMENT-RUNBOOK ??local-pg) |
+| Database | postgres live drill | PASS | migrate+CRUD+locking vs PG 16.4 |
 | Queue | atomic claims + DLQ + idempotency | PASS | orchestration suite (race + reclaim + recovery tests) |
 | Workers | crash recovery | PASS | reclaimStale + restart-recovery test |
 | AI/model routing | fallback/budget/context guards | PASS | models suite incl. context-overflow regression |
@@ -23,7 +23,7 @@ Verdict: **NOT CERTIFIED - BLOCKED (see items)**
 | Disaster Recovery | restart & outage drills | PASS | recovery.test.ts + G-11 readiness failure |
 | Rollback | app rollback procedure | PASS | docs/ROLLBACK-RUNBOOK.md; compose image rollback = docker-host step |
 | Performance | load test <=100 concurrent | PASS | scripts/load-test.mjs: p95<=182ms, 0 errors (429s counted separately) |
-| Docker | build+smoke+persistence+scan | BLOCKED-LOCAL | no daemon locally; docker.yml is the automated gate |
+| Docker | build+smoke+persistence+trivy scan | PASS | workflow conclusion=success |
 | CI/CD | ci.yml matrix | CI-GATE | ubuntu+windows enforced on main |
 | Release engineering | tag-SBOM-GitHubRelease | CI-GATE | release.yml runs on v* tags |
 | Documentation | required docs present | PASS | 18 documents |
