@@ -111,10 +111,9 @@ jobs:
 
       - name: Verify installed dependency versions inside the image
         run: |
-          echo "brace-expansion:"; docker run --rm agencyos-control-plane:ci node -e "console.log(require('/app/node_modules/brace-expansion/package.json').version)"
-          echo "undici present?"; docker run --rm agencyos-control-plane:ci sh -c "ls /app/node_modules | grep -x undici || echo none"
-          echo "tar present?"; docker run --rm agencyos-control-plane:ci sh -c "ls /app/node_modules | grep -x tar || echo none"
-          echo "prod tree:"; docker run --rm agencyos-control-plane:ci npm ls --all --omit=dev 2>&1 | grep -E "brace-expansion|undici|[[:space:]]tar@" || true
+          echo "brace-expansion:"; docker run --rm --entrypoint node agencyos-control-plane:ci -e "console.log(require('/app/node_modules/brace-expansion/package.json').version)"
+          echo "undici present?"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x undici || echo none"
+          echo "tar present?"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x tar || echo none"
 
       - name: Install Trivy CLI
         run: |
