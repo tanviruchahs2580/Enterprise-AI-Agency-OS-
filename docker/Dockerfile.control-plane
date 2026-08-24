@@ -1,0 +1,27 @@
+# Control plane — Node 24 runs TypeScript natively (ADR-0003)
+FROM node:24-bookworm-slim AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Install production dependencies only (lockfile-pinned, reproducible)
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# Copy workspace sources
+COPY packages ./packages
+COPY apps/control-plane ./apps/control-plane
+COPY scripts ./scripts
+
+# Non-root user, no shell needed
+RUN groupadd -r agency && useradd -r -g agency agency \
+  && mkdir -p /app/data && chown -R agency:agency /app
+USER agency
+
+EXPOSE 3000
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["node", "apps/control-plane/src/server.ts"]

@@ -1,0 +1,26 @@
+# Dashboard — build SPA then serve statically
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY apps/dashboard ./apps/dashboard
+RUN npm run build --workspace @agency/dashboard
+
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /app/apps/dashboard/dist /usr/share/nginx/html
+RUN printf 'server {\n\
+  listen 8080;\n\
+  location /api/ {\n\
+    proxy_pass http://control-plane:3000;\n\
+    proxy_set_header Host $host;\n\
+    proxy_http_version 1.1;\n\
+    proxy_set_header Connection "";\n\
+    proxy_read_timeout 3600s;\n\
+  }\n\
+  location / {\n\
+    root /usr/share/nginx/html;\n\
+    try_files $uri /index.html;\n\
+  }\n\
+}\n' > /etc/nginx/conf.d/default.conf
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1

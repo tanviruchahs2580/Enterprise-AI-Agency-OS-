@@ -1,0 +1,89 @@
+# Enterprise AI Agency OS — deployment stack
+#
+# Profiles:
+#   default   → control-plane + dashboard (SQLite volume)
+#   postgres  → adds PostgreSQL; set DATABASE_URL for the control plane
+#   observability → Prometheus + Grafana (+ optional exporters)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose --profile postgres up -d
+#   docker compose --profile observability up -d
+
+services:
+  control-plane:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.control-plane
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL:-/app/data/agencyos.sqlite}
+      ADMIN_BOOTSTRAP_KEY: ${ADMIN_BOOTSTRAP_KEY:?set ADMIN_BOOTSTRAP_KEY}
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-docker}
+      MODEL_PROVIDER_API_KEY: ${MODEL_PROVIDER_API_KEY:-}
+      MODEL_PROVIDER_BASE_URL: ${MODEL_PROVIDER_BASE_URL:-}
+      DEFAULT_DAILY_BUDGET_USD: ${DEFAULT_DAILY_BUDGET_USD:-25}
+    volumes:
+      - agency-data:/app/data
+    # Docker socket is NOT mounted by default — enable only when the docker
+    # sandbox provider is used and understand the trust implications:
+    # - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    depends_on:
+      - control-plane
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: agency
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: agencyos
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agency"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: ["observability"]
+    volumes:
+      - ./infrastructure/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+
+volumes:
+  agency-data:
+  pg-data:
+  prom-data:
+  grafana-data:
