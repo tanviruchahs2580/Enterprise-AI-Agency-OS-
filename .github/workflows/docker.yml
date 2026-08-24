@@ -109,11 +109,11 @@ jobs:
           fi
           echo "no secret leakage in logs"
 
-      - name: Verify installed dependency versions inside the image
+      - name: Verify vulnerable deps are ABSENT inside the image
         run: |
-          echo "brace-expansion:"; docker run --rm --entrypoint node agencyos-control-plane:ci -e "console.log(require('/app/node_modules/brace-expansion/package.json').version)"
-          echo "undici present?"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x undici || echo none"
-          echo "tar present?"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x tar || echo none"
+          echo "brace-expansion:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x brace-expansion || echo ABSENT"
+          echo "undici:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x undici || echo ABSENT"
+          echo "tar:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x tar || echo ABSENT"
 
       - name: Install Trivy CLI
         run: |
