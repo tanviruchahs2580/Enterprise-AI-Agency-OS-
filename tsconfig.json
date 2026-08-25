@@ -7,6 +7,7 @@
     { "path": "packages/models" },
     { "path": "packages/orchestration" },
     { "path": "packages/integrations" },
+    { "path": "packages/delivery" },
     { "path": "apps/control-plane" }
   ]
 }

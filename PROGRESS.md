@@ -2,6 +2,21 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.5.0 — autonomous delivery loop + end-to-end demo (2026-08-25)
+- [x] packages/delivery: TemplateCodegen, reviewer, self-healing pipeline —
+      4/4 integration tests (happy + fault→repair→green + secret-BLOCK + budget-BLOCK)
+- [x] Control plane: delivery routes + delivery-worker (deliver_task job) + per-project managed repos
+- [x] Demo harness `scripts/demo-delivery.mjs`: HTTP-driven autonomous run
+      WITH intentional fault → red → repaired merge → review → receipt
+      **SUCCESS 9/9 checks** (evidence .demo-evidence.json)
+- [x] Bug fix: NODE_TEST_CONTEXT leak → nested node --test silently skipped
+
+## v0.4.0 — universal QA cycle (2026-08-25)
+- [x] UI runtime QA 6/6 via Playwright, process metrics gauges, API edge-case regressions
+
+## v0.3.0 — production certification cycle (2026-08-25)
+- [x] Docker validation green via CI, load test, PG extended drill, runbooks, UAT matrix
+
 ## v0.3.0 — PRODUCTION CERTIFIED (2026-08-25)
 - [x] Certification gate: **CERTIFIED** — all mandatory gates PASS
       (docs/PRODUCTION-CERTIFICATION-REPORT.md)

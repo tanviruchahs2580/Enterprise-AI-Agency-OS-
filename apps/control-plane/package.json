@@ -15,6 +15,7 @@
     "@agency/models": "*",
     "@agency/orchestration": "*",
     "@agency/integrations": "*",
+    "@agency/delivery": "*",
     "fastify": "^5.0.0"
   }
 }

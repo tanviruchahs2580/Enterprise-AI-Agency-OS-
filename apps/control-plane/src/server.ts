@@ -1,6 +1,7 @@
 import { buildContext } from "./context.ts";
 import { buildApp } from "./app.ts";
 import { registerWorkers } from "./workers.ts";
+import { registerDeliveryWorkers } from "./delivery-worker.ts";
 import { sweepExpiredApprovals } from "./sweeper.ts";
 
 async function main(): Promise<void> {
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
   }
 
   registerWorkers(ctx);
+  registerDeliveryWorkers(ctx);
   await ctx.jobs.start();
 
   // Approval expiry sweeper (GAP G-03) — deterministic, auditable, idempotent.

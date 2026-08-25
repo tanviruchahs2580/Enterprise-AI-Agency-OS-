@@ -1,0 +1,78 @@
+{
+  "steps": [
+    {
+      "name": "project_created",
+      "id": "prj_305906d38bd068bf62fc0deb",
+      "slug": "autonomous-demo-1787640424989"
+    },
+    {
+      "name": "task_created",
+      "taskId": "tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7"
+    },
+    {
+      "name": "task_ready",
+      "state": "ready"
+    },
+    {
+      "name": "dispatched",
+      "executionId": "exe_2eb46bd88d206ef755b530b5",
+      "traceId": "trc_194fe9b345674d1484b54d8e",
+      "status": "queued"
+    },
+    {
+      "name": "execution_finished",
+      "status": "succeeded",
+      "summary": "delivered 3 files via agency/task-tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7",
+      "taskStatus": "review",
+      "receipt": "issued(hash-chained)"
+    }
+  ],
+  "checks": [
+    {
+      "name": "execution_succeeded",
+      "ok": true,
+      "detail": "delivered 3 files via agency/task-tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7"
+    },
+    {
+      "name": "quality_receipt_issued",
+      "ok": true,
+      "detail": "hash-chained receipt"
+    },
+    {
+      "name": "merged_file_on_disk",
+      "ok": true,
+      "detail": "data/repos/autonomous-demo-1787640424989-fc0deb/src/calculator.js"
+    },
+    {
+      "name": "repaired_operator_merged",
+      "ok": true,
+      "detail": "mul repaired to '*' in merged main"
+    },
+    {
+      "name": "no_broken_operator",
+      "ok": true,
+      "detail": "no leftover '+' in mul"
+    },
+    {
+      "name": "trace_id_present",
+      "ok": true,
+      "detail": "trace linkage"
+    },
+    {
+      "name": "audit_has_delivery_events",
+      "ok": true,
+      "detail": "22 events"
+    },
+    {
+      "name": "handoff_knowledge_persisted",
+      "ok": true,
+      "detail": "5 matches"
+    },
+    {
+      "name": "metrics_live",
+      "ok": true,
+      "detail": "56 lines"
+    }
+  ],
+  "verdict": "SUCCESS"
+}

@@ -472,6 +472,81 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { ok: true };
   });
 
+  // ---------- autonomous delivery runs ----------
+  app.post("/api/v1/delivery/runs", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:dispatch");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["taskId"]);
+
+    const task = ctx.db.get<{ org_id: string; project_id: string; description: string; status: string }>(
+      "SELECT org_id, project_id, description, status FROM tasks WHERE id=? AND org_id=?",
+      [String(body.taskId), me.orgId]
+    );
+    if (!task) throw new AppError("NOT_FOUND", "task not found");
+
+    let spec: { kind?: string };
+    try {
+      spec = JSON.parse(String(task.description));
+    } catch {
+      spec = {};
+    }
+    if (spec.kind !== "delivery") {
+      throw new AppError("VALIDATION_ERROR", "task description must be DeliverySpec JSON (kind=delivery)");
+    }
+
+    const execId = cryptoRandomId("exe");
+    const traceId = cryptoRandomId("trc");
+    // Resolve a REAL agent row (FK) — default to backend-engineer.
+    let agentFk: string | null = body.agentId ? String(body.agentId) : null;
+    if (!agentFk || !ctx.db.get("SELECT id FROM agents WHERE id=?", [agentFk])) {
+      const eng = ctx.db.get<{ id: string }>(
+        "SELECT id FROM agents WHERE org_id=? AND role='ENGINEERING' ORDER BY name LIMIT 1",
+        [me.orgId]
+      );
+      if (!eng) throw new AppError("DEPENDENCY_UNAVAILABLE", "no engineering agent seeded");
+      agentFk = String(eng.id);
+    }
+    ctx.db.insert("executions", {
+      id: execId, org_id: me.orgId,
+      task_id: String(body.taskId),
+      agent_id: agentFk,
+      status: "queued",
+      attempt: 1,
+      trace_id: traceId,
+      created_at: ctx.db.now(),
+    });
+    ctx.jobs.enqueue({
+      orgId: me.orgId,
+      type: "deliver_task",
+      data: {
+        executionId: execId,
+        taskId: String(body.taskId),
+        injectFault: Boolean(body.injectFault),
+        maxRepairAttempts: body.maxRepairAttempts ? Number(body.maxRepairAttempts) : 2,
+      },
+      idempotencyKey: `delivery:${execId}`,
+    });
+    auditEvent(ctx, me, "delivery.dispatched", "execution", execId, "high");
+    publishEvent(ctx, me.orgId, me, "DeliveryStarted", { executionId: execId, taskId: body.taskId });
+    reply.code(202);
+    return { executionId: execId, traceId, status: "queued" };
+  });
+
+  app.get("/api/v1/delivery/runs/:id", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const { id } = req.params as { id: string };
+    const row = ctx.db.get("SELECT * FROM executions WHERE id=? AND org_id=?", [id, me.orgId]);
+    if (!row) throw new AppError("NOT_FOUND", "execution not found");
+    const receiptTask = ctx.db.get<{ title: string; quality_receipt: string | null; status: string }>(
+      `SELECT t.title, t.quality_receipt, t.status FROM executions e
+       JOIN tasks t ON t.id = e.task_id WHERE e.id = ?`,
+      [id]
+    );
+    return { execution: row, task: receiptTask ?? null };
+  });
+
   // ---------- reviews ----------
   app.post("/api/v1/tasks/:id/reviews", async (req, reply) => {
     const me = ident(req);
