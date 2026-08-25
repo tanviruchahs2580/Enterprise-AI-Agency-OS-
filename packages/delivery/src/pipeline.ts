@@ -1,8 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync, spawn } from "node:child_process";
-import { GitWorktreeService, ProcessSandbox } from "@agency/orchestration";
+import { execFileSync } from "node:child_process";
+import { GitWorktreeService } from "@agency/orchestration";
 import type {
   CodegenEngine,
   DeliverySpec,
@@ -58,8 +57,6 @@ export interface DeliveryOutcome {
 export async function runDeliveryPipeline(
   opts: DeliveryPipelineOptions
 ): Promise<DeliveryOutcome> {
-  const svc = new GitWorktreeService();
-  const sandbox = new ProcessSandbox();
   const stages: DeliveryOutcome["stages"] = [];
   const attempts: DeliveryOutcome["attempts"] = [];
   const record = (stage: DeliveryStage, detail: Record<string, unknown> = {}) => {
@@ -71,6 +68,7 @@ export async function runDeliveryPipeline(
 
   try {
     // ---- Phase 3: isolated worktree (never touch main directly) ----
+    const svc = new GitWorktreeService();
     const wt = svc.create(opts.repoPath, opts.taskId);
     worktreePath = wt.path;
     record("worktree_created", { path: wt.path, branch: wt.branch });
@@ -129,7 +127,7 @@ export async function runDeliveryPipeline(
         };
       }
       const expected = info.expected;
-      const actual = info.actual;
+      // info.actual is recorded; repair uses expected + operand hints
       const repaired = await opts.codegen.repair(
         opts.spec,
         files,
@@ -137,7 +135,7 @@ export async function runDeliveryPipeline(
           testOutput: res.output.slice(-2000),
           failingTest: info.failingTest,
           expected,
-          actual,
+          actual: info.actual,
           file: fileHint?.startsWith("src/") ? fileHint : `src/${opts.spec.moduleName}.js`,
           operandHintA: info.operandHintA,
           operandHintB: info.operandHintB,
