@@ -109,7 +109,20 @@ export class MetricsRegistry {
 
     lines.push("# HELP agencyos_build_info Build metadata.");
     lines.push("# TYPE agencyos_build_info gauge");
-    lines.push('agencyos_build_info{version="0.2.0"} 1');
+    lines.push('agencyos_build_info{version="0.4.0"} 1');
+
+    // --- Process (runtime health; no secrets) ---
+    const mem = process.memoryUsage();
+    const up = process.uptime();
+    lines.push("# HELP agencyos_process_resident_memory_bytes Resident set size.");
+    lines.push("# TYPE agencyos_process_resident_memory_bytes gauge");
+    lines.push(`agencyos_process_resident_memory_bytes ${mem.rss}`);
+    lines.push("# HELP agencyos_process_heap_used_bytes Heap used.");
+    lines.push("# TYPE agencyos_process_heap_used_bytes gauge");
+    lines.push(`agencyos_process_heap_used_bytes ${mem.heapUsed}`);
+    lines.push("# HELP agencyos_process_uptime_seconds Process uptime.");
+    lines.push("# TYPE agencyos_process_uptime_seconds gauge");
+    lines.push(`agencyos_process_uptime_seconds ${up.toFixed(0)}`);
 
     return lines.join("\n") + "\n";
   }

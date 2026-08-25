@@ -491,6 +491,42 @@ test("AUTHZ: revoked API key is rejected immediately", async () => {
   assert.equal(afterRevocation.status, 401);
 });
 
+test("API EDGE: malformed JSON → 400 schema-safe error", async () => {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: { authorization: `Bearer ${adminKey}`, "content-type": "application/json" },
+    payload: "{not-valid-json",
+  });
+  assert.equal(res.statusCode, 400);
+  const body = res.json() as { error?: { code?: string } };
+  assert.equal(body.error?.code, "VALIDATION_ERROR");
+});
+
+test("API EDGE: oversized body is rejected before processing", async () => {
+  const big = "x".repeat(2 * 1024 * 1024); // > 1MB bodyLimit
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: { authorization: `Bearer ${adminKey}`, "content-type": "application/json" },
+    payload: `{"name":"${big}"}`,
+  });
+  assert.ok([400, 413].includes(res.statusCode), `got ${res.statusCode}`);
+});
+
+test("DATA INTEGRITY: concurrent duplicate slugs — exactly one project wins", async () => {
+  const results = await Promise.all([
+    api("POST", "/api/v1/projects", { name: "Dup Slug", slug: "dup-slug-unique" }),
+    api("POST", "/api/v1/projects", { name: "Dup Slug", slug: "dup-slug-unique" }),
+  ]);
+  const codes = results.map((r) => r.status).sort();
+  assert.deepEqual(codes, [201, 409]);
+  const count = ctx.db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM projects WHERE slug='dup-slug-unique'"
+  );
+  assert.equal(Number(count!.n), 1);
+});
+
 test("APPROVAL RACE: concurrent decisions â€” exactly one wins", async () => {
   const resId = `race-${Date.now()}`;
   const apr = await api("POST", "/api/v1/approvals", {

@@ -2,6 +2,25 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.4.0] — 2026-08-25
+
+### Added — universal QA cycle
+- **UI runtime QA** (`scripts/ui-test.mjs` + Playwright Chromium): 6 dashboard
+  pages verified in a real browser — render, zero console errors, zero failed
+  requests.
+- **Process observability**: RSS / heap-used / uptime gauges on `/metrics`.
+- **API edge-case coverage**: malformed JSON → typed 400; oversized body
+  rejection; concurrent duplicate-slug race (exactly one winner).
+- **Load ceiling probe at 250 concurrency**: 0 errors @666 RPS, p95 392ms —
+  documented SLO-compliant zone ≤~100–150 concurrent.
+- Startup-to-healthy measured: ~2.7s.
+
+### Fixed (found by the new QA)
+- Dashboard called root-level `/ready` through the `/api/v1` prefix (404).
+- Overview fetched tasks without required `projectId` (400).
+- Malformed JSON bodies returned `INTERNAL` error code instead of a typed
+  `VALIDATION_ERROR` client error.
+
 ## [0.3.0] — 2026-08-25
 
 ### Added — production certification cycle

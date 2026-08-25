@@ -17,6 +17,9 @@ items were executed once by the engineering agent and recorded here.
 | J | Full environment loss recovery | fresh clone → bootstrap → migrate → seed → tests | clean-env drill (recorded in PROGRESS.md); backup/restore drill row-equality | PASS |
 | K | Concurrent decisions on one approval | approve+reject race | e2e APPROVAL RACE (200/409) | PASS |
 | L | Context overflow safety | prompt > every model window | models unit context-overflow test | PASS |
+| M | UI runtime QA (6 pages × Chromium) | real browser: render + zero console errors + zero failed requests | `scripts/ui-test.mjs` — 6/6 PASS (v0.4.0) | PASS |
+| N | API edge cases | malformed JSON→400 VALIDATION_ERROR; >1MB body rejected; concurrent duplicate slug → one 201/one 409 | e2e API EDGE + DATA INTEGRITY tests (v0.4.0) | PASS |
+| O | Process observability | RSS/heap/uptime gauges on /metrics | metrics registry v0.4.0 | PASS |
 
 ## UAT sign-off conditions
 

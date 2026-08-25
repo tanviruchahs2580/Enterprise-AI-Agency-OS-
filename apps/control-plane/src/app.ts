@@ -97,8 +97,23 @@ export function buildApp(ctx: AppContext): FastifyInstance {
         },
       });
     }
+    // Malformed request bodies (fastify FST_ERR_CTP_* / JSON SyntaxError)
+    const isBodyParse =
+      typeof err.code === "string" && err.code.startsWith("FST_ERR_CTP") ||
+      err instanceof SyntaxError;
+    if (isBodyParse) {
+      reply.code(400);
+      return reply.send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "request body is not valid for content-type",
+          requestId,
+          retryable: false,
+        },
+      });
+    }
     // validation / unknown
-    const status = (err as { statusCode?: number }).statusCode ?? 500;
+    const status = err.statusCode ?? 500;
     const validation = (err as { validation?: unknown }).validation;
     reply.code(status === 413 ? 400 : status >= 500 ? 500 : status);
     if (status >= 500) {

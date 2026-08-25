@@ -24,7 +24,9 @@ export async function api<T = unknown>(
   path: string,
   body?: unknown
 ): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, {
+  // Health/readiness live at the server root, everything else under /api/v1.
+  const url = /^\/(health|ready|live)\b/.test(path) ? path : `/api/v1${path}`;
+  const res = await fetch(url, {
     method,
     headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),

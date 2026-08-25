@@ -17,7 +17,11 @@ export default function Overview() {
   const ready = useApi<Ready>("/ready");
   const costs = useApi<Costs>("/costs/summary");
   const agents = useApi<{ items: { id: string; status: string }[] }>("/agents");
-  const tasks = useApi<{ items: { id: string; status: string }[] }>("/tasks?limit=200");
+  const projects = useApi<{ items: { id: string }[] }>("/projects");
+  const firstProject = projects.data?.items[0]?.id ?? "";
+  const tasks = useApi<{ items: { id: string; status: string }[] }>(
+    firstProject ? `/tasks?projectId=${firstProject}&limit=200` : "/tasks?projectId=none"
+  );
   const findings = useApi<{ items: { severity: string }[] }>("/security/findings");
   const events = useEventStream(true);
 
