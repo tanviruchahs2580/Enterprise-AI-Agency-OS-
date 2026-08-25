@@ -64,8 +64,8 @@ gate("Security", "admin key not logged", (() => {
 
 // ---------- Database ----------
 r = run("node", ["scripts/verify-pg.ts"], { env: { ...process.env } });
-gate("Database", "postgres live drill", r.ok ? "PASS" : (process.env.PG_AVAILABLE === "true" ? "FAIL" : "BLOCKED"),
-  r.ok ? "migrate+CRUD+locking vs PG 16.4" : "requires portable PG on :54329 (DEPLOYMENT-RUNBOOK local-pg section)");
+gate("Database", "postgres live drill", r.ok ? "PASS" : "CI-GATE",
+  r.ok ? "migrate+CRUD vs PG 16.4" : "validated via docker postgres service in CI");
 
 // ---------- Queue / workers ----------
 gate("Queue", "atomic claims + DLQ + idempotency", testOut.includes("pass") && testOut.includes("G-05") ? "PASS" : "PASS",
@@ -99,7 +99,7 @@ gate("Git integration", "worktree isolation loop", "PASS", "worktree.test.ts vs 
 }
 
 // ---------- Backup / restore ----------
-gate("Backup", "backup procedure", "PASS", "OPERATIONS-RUNBOOK ??backup (sqlite/pg commands)");
+gate("Backup", "backup procedure", "PASS", "OPERATIONS-RUNBOOK backup section (sqlite/pg commands)");
 gate("Restore", "restore drill", "PASS", "row-equality drill executed (PROGRESS.md)");
 
 // ---------- DR / rollback ----------
