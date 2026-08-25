@@ -58,7 +58,7 @@ export class TemplateCodegen implements CodegenEngine {
     ) {
       return { files, diagnosis: "insufficient failure info for automated repair", changed: false };
     }
-    const { expected, actual } = failure;
+    const { expected } = failure;
     // derive which operator would produce the expected result
     const candidates: Record<string, number> = {
       "+": failure.operandHintA! + failure.operandHintB!,
