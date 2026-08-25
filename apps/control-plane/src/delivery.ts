@@ -123,7 +123,9 @@ export async function executeDelivery(
     status: out.ok ? "succeeded" : "failed",
     finished_at: ctx.db.now(),
     output_summary: out.ok
-      ? `delivered ${out.files.length} files via ${out.mergedBranch}`
+      ? out.converged
+        ? `self-heal converged to main (no net diff) via ${out.mergedBranch}`
+        : `delivered ${out.files.length} files via ${out.mergedBranch}`
       : `blocked: ${out.blocked}`,
     error_code: out.ok ? null : "DELIVERY_BLOCKED",
     sandbox_id: out.worktreePath ?? null,

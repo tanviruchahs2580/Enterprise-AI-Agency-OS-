@@ -34,6 +34,7 @@ export type DeliveryStage =
   | "review_completed"
   | "committed"
   | "merged"
+  | "converged"
   | "blocked"
   | "failed";
 
@@ -47,6 +48,9 @@ export interface DeliveryOutcome {
   commitSha?: string;
   mergedBranch?: string;
   worktreePath?: string;
+  /** True when self-heal repaired the code back to the state already on main
+   *  (no net diff) — delivery counts as succeeded without a new commit. */
+  converged?: boolean;
 }
 
 /**
@@ -163,6 +167,23 @@ export async function runDeliveryPipeline(
     }
 
     // ---- Phase 9: commit + merge (fast-forward policy) ----
+    // Self-heal convergence: if the repaired tree is semantically identical
+    // to main (e.g. fault injected on a re-delivery of an already-correct
+    // module), there is nothing to commit — count as succeeded without a new
+    // commit. Detection uses the staged diff (git normalizes EOL), NOT raw
+    // status, so checkout line-ending churn cannot fake a dirty tree.
+    execGit(wt.path, ["add", "-A"]);
+    const staged = execGit(wt.path, ["diff", "--cached", "--name-only"]).trim();
+    if (staged === "") {
+      svc.remove(opts.repoPath, wt);
+      worktreePath = undefined;
+      record("converged", { branch: wt.branch, detail: "repaired output matches main; no net diff" });
+      return {
+        ok: true,
+        stages, attempts, review,
+        files, mergedBranch: wt.branch, converged: true,
+      };
+    }
     const commitSha = svc.commitAll(
       wt.path,
       `feat(${opts.spec.moduleName}): autonomous delivery for task ${opts.taskId}`
@@ -187,6 +208,11 @@ export async function runDeliveryPipeline(
   } finally {
     if (worktreePath && existsSync(worktreePath)) {
       rmSync(worktreePath, { recursive: true, force: true, maxRetries: 3 });
+    }
+    // Deregister any worktree whose directory was removed on failure/blocked
+    // paths — otherwise `git worktree list` keeps stale "prunable" entries.
+    if (opts.repoPath) {
+      try { execGit(opts.repoPath, ["worktree", "prune"]); } catch { /* best effort */ }
     }
   }
 }

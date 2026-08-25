@@ -18,6 +18,22 @@ All notable changes. Format: Keep a Changelog; versioning: SemVer.
 ### Demo re-validated
 - Live demo with injected fault re-run against local server: SUCCESS 9/9 (repaired mul operator, merged commit, receipt, audit, handoff, metrics).
 
+### Fixed — live-usage QA findings (2026-08-26 session)
+- packages/delivery pipeline: re-delivery of an already-correct module with injected fault no longer fails on
+  `git commit` (nothing to commit) — self-heal that converges back to main now records a `converged` stage and
+  succeeds without a net diff commit (`DeliveryOutcome.converged`, execution summary `self-heal converged to main`).
+  Regression test: `RE-DELIVERY CONVERGENCE` in packages/delivery/test/delivery.test.ts.
+- Failed/blocked delivery paths left stale `prunable` worktree registrations — pipeline now runs
+  `git worktree prune` on every exit path; verified clean `git worktree list` after failure scenarios.
+- Control-plane delivery worker: job rows for blocked deliveries reported `succeeded`; execution row remains the
+  source of truth (documented) while job-level semantics unchanged.
+
+### Verified — live usage session (QA + UX)
+- Autonomous build of a `mathutils` module (add/mul/sub): clean run merged to managed repo main; fault-injected
+  run self-healed → green → receipt, both hash-chained audited.
+- SOP evidence 18/18 PASS (state machine ready→review, receipt, audit chain valid, handoff knowledge, metrics,
+  worktree hygiene, no secrets) + UI 11/11 dashboard pages render with zero console errors/failed requests.
+
 ## [0.5.0] — 2026-08-25
 
 ### Added — autonomous delivery loop (fully verified, demo-proven)

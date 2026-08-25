@@ -127,3 +127,43 @@ test("BUDGET GATE: unparseable failure safely blocks instead of looping forever"
   assert.match(out.blocked!, /no single-operator|budget|unparseable|cannot fix/i);
   rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
 });
+
+test("RE-DELIVERY CONVERGENCE: fault-injected second delivery of an already-correct module succeeds with no net diff and leaves no stale worktree", async () => {
+  const repo = freshRepo();
+  // First delivery merges correct code into main.
+  const first = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_conv_1",
+    spec: SPEC,
+    codegen: new TemplateCodegen(),
+  });
+  assert.equal(first.ok, true, `blocked: ${first.blocked}`);
+  const headBefore = git(repo, "rev-parse", "HEAD").trim();
+
+  // Second delivery with injected fault: self-heal repairs back to identical
+  // content — must count as succeeded (converged), NOT fail on empty commit,
+  // and must not leave a prunable worktree registration behind.
+  const stagesSeen: string[] = [];
+  const second = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_conv_2",
+    spec: SPEC,
+    codegen: new TemplateCodegen(),
+    injectFault: true,
+    maxRepairAttempts: 2,
+    onStage: (s) => stagesSeen.push(s),
+  });
+
+  assert.equal(second.ok, true, `blocked: ${second.blocked}`);
+  assert.equal(second.converged, true, "outcome should be marked converged");
+  assert.ok(stagesSeen.includes("converged"), "converged stage recorded");
+  assert.ok(!second.commitSha, "no commit when there is no net diff");
+  assert.equal(git(repo, "rev-parse", "HEAD").trim(), headBefore, "main HEAD unchanged");
+  assert.match(readFileSync(join(repo, "src", "calculator.js"), "utf8"), /return a \* b;/);
+
+  const wl = git(repo, "worktree", "list");
+  assert.doesNotMatch(wl, /agency\/task/, "no stale worktree registrations remain");
+  assert.doesNotMatch(wl, /prunable/, "worktree metadata pruned");
+
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});

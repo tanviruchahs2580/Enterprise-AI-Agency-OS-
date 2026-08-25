@@ -2,6 +2,14 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.5.1 — live-usage QA cycle (2026-08-26, later same day)
+- [x] Live autonomous build: `mathutils` (add/mul/sub) — clean run MERGED; fault-injected run SELF-HEALED
+      (converged) — receipts hash-chained, audit chain valid, handoff knowledge persisted
+- [x] DEFECT fixed: convergence case (repair → identical to main) failed at empty `git commit`;
+      now `converged` outcome + regression test (67/67 tests PASS)
+- [x] DEFECT fixed: stale `prunable` worktree registrations on failed/blocked runs → `git worktree prune` on all paths
+- [x] QA evidence: SOP 18/18 PASS · UI 11/11 pages zero-error · worktree list clean post-failure
+
 ## v0.5.1 — enterprise closure: Docker stack + build hardening + re-validation (2026-08-26)
 - [x] Docker hardening: Dockerfile.dashboard workspace manifest copy fixed (layer-cache correct), both images local build PASS
 - [x] Docker stack verified LIVE on this host: control-plane (production + PG 16.4, health/ready/metrics) + dashboard + postgres all healthy; auth write/read; persistence across restart; non-root agency user; log leak scan clean
