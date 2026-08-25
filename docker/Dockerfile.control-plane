@@ -1,5 +1,5 @@
 # Control plane — Node 24 runs TypeScript natively (ADR-0003)
-FROM node:24-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
