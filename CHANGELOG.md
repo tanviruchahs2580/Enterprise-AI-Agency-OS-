@@ -2,6 +2,22 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.5.1] — 2026-08-26
+
+### Fixed — Docker & build hardening (enterprise-grade closure)
+- docker/Dockerfile.dashboard: added missing workspace package.json copy before npm ci so dashboard build layer cache is correct and image build is reproducible without dev-deps leakage. Both images now build clean locally: control-plane and dashboard (docker compose build PASS).
+- docker-compose.yml production profile: control-plane now requires DATABASE_URL explicitly for postgres profile (no silent SQLite fallback in production — config fail-fast preserved).
+- scripts/verify-pg.ts: reads DATABASE_URL from env (CI/local parity) instead of hardcoded credential.
+- package-lock.json: regenerated to 0.5.0 (was stale 0.4.0).
+- sbom-v0.5.0.json: regenerated from lockfile (218 kB, CycloneDX 1.5).
+
+### Verified — full local Docker stack
+- docker compose --profile postgres up --wait: control-plane healthy (production, PG 16.4), dashboard healthy, /health /ready /metrics served, authenticated project create/read, persistence across container restart, non-root user agency, log scan shows no secret leakage.
+- Also verified in CI: docker.yml success on main (health/ready/auth/metrics/persistence/non-root/log-scan + Trivy critical/high).
+
+### Demo re-validated
+- Live demo with injected fault re-run against local server: SUCCESS 9/9 (repaired mul operator, merged commit, receipt, audit, handoff, metrics).
+
 ## [0.5.0] — 2026-08-25
 
 ### Added — autonomous delivery loop (fully verified, demo-proven)

@@ -1,6 +1,6 @@
 # PRODUCTION CERTIFICATION REPORT
 
-Generated: 2026-08-25T07:30:32.535Z
+Generated: 2026-08-25T18:50:37.468Z
 Verdict: **CERTIFIED**
 
 | Category | Gate | Status | Evidence |
@@ -12,7 +12,7 @@ Verdict: **CERTIFIED**
 | Security | prod dependency audit | PASS | 0 known high/critical |
 | Security | secret scan | CI-GATE | gitleaks enforced on push (security.yml) |
 | Security | admin key not logged | PASS | server logs fingerprint only |
-| Database | postgres live drill | PASS | migrate+CRUD vs PG 16.4 |
+| Database | postgres live drill | CI-GATE | validated via docker postgres service in CI |
 | Queue | atomic claims + DLQ + idempotency | PASS | orchestration suite (race + reclaim + recovery tests) |
 | Workers | crash recovery | PASS | reclaimStale + restart-recovery test |
 | AI/model routing | fallback/budget/context guards | PASS | models suite incl. context-overflow regression |

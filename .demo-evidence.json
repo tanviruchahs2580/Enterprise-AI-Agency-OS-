@@ -2,12 +2,12 @@
   "steps": [
     {
       "name": "project_created",
-      "id": "prj_305906d38bd068bf62fc0deb",
-      "slug": "autonomous-demo-1787640424989"
+      "id": "prj_000461f05442e31fccbbf49a",
+      "slug": "autonomous-demo-1787683761221"
     },
     {
       "name": "task_created",
-      "taskId": "tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7"
+      "taskId": "tsk_01a03a41-6cab-772a-9070-73b04fc1d5c1"
     },
     {
       "name": "task_ready",
@@ -15,14 +15,14 @@
     },
     {
       "name": "dispatched",
-      "executionId": "exe_2eb46bd88d206ef755b530b5",
-      "traceId": "trc_194fe9b345674d1484b54d8e",
+      "executionId": "exe_b0fc899254a10259e0568d4f",
+      "traceId": "trc_df8a840955a3eaefdad5b06e",
       "status": "queued"
     },
     {
       "name": "execution_finished",
       "status": "succeeded",
-      "summary": "delivered 3 files via agency/task-tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7",
+      "summary": "delivered 3 files via agency/task-tsk_01a03a41-6cab-772a-9070-73b04fc1d5c1",
       "taskStatus": "review",
       "receipt": "issued(hash-chained)"
     }
@@ -31,7 +31,7 @@
     {
       "name": "execution_succeeded",
       "ok": true,
-      "detail": "delivered 3 files via agency/task-tsk_01a037ac-2b1d-7fbd-8bf4-5c8c3f2295a7"
+      "detail": "delivered 3 files via agency/task-tsk_01a03a41-6cab-772a-9070-73b04fc1d5c1"
     },
     {
       "name": "quality_receipt_issued",
@@ -41,7 +41,7 @@
     {
       "name": "merged_file_on_disk",
       "ok": true,
-      "detail": "data/repos/autonomous-demo-1787640424989-fc0deb/src/calculator.js"
+      "detail": "data/repos/autonomous-demo-1787683761221-bbf49a/src/calculator.js"
     },
     {
       "name": "repaired_operator_merged",
@@ -61,17 +61,17 @@
     {
       "name": "audit_has_delivery_events",
       "ok": true,
-      "detail": "22 events"
+      "detail": "4 events"
     },
     {
       "name": "handoff_knowledge_persisted",
       "ok": true,
-      "detail": "5 matches"
+      "detail": "1 matches"
     },
     {
       "name": "metrics_live",
       "ok": true,
-      "detail": "56 lines"
+      "detail": "55 lines"
     }
   ],
   "verdict": "SUCCESS"

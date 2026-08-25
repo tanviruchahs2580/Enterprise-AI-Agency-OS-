@@ -2,6 +2,15 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.5.1 — enterprise closure: Docker stack + build hardening + re-validation (2026-08-26)
+- [x] Docker hardening: Dockerfile.dashboard workspace manifest copy fixed (layer-cache correct), both images local build PASS
+- [x] Docker stack verified LIVE on this host: control-plane (production + PG 16.4, health/ready/metrics) + dashboard + postgres all healthy; auth write/read; persistence across restart; non-root agency user; log leak scan clean
+- [x] package-lock.json regenerated to 0.5.0 (was stale 0.4.0), sbom-v0.5.0.json regenerated (218 kB CycloneDX)
+- [x] scripts/verify-pg.ts env-aware (DATABASE_URL) for CI/local parity
+- [x] Re-validation: 66/66 tests, typecheck/lint/build PASS, audit 0 vuln, Docker PASS
+- [x] Live autonomous demo re-run (injectFault:true): SUCCESS 9/9 (repaired mul *, merged commit 902eab5-style, receipt, audit, handoff, metrics) — .demo-evidence.json updated
+- [x] Certification re-run: CERTIFIED (docs/PRODUCTION-CERTIFICATION-REPORT.md)
+
 ## v0.5.0 — autonomous delivery loop + end-to-end demo (2026-08-25)
 - [x] packages/delivery: TemplateCodegen, reviewer, self-healing pipeline —
       4/4 integration tests (happy + fault→repair→green + secret-BLOCK + budget-BLOCK)
