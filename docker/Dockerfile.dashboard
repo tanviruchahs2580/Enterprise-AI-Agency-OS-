@@ -1,5 +1,5 @@
 # Dashboard — build SPA then serve statically
-FROM node:24-bookworm-slim AS build
+FROM node:25-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/dashboard/package.json apps/dashboard/package.json
