@@ -7,7 +7,7 @@ RUN npm ci --ignore-scripts
 COPY apps/dashboard ./apps/dashboard
 RUN npm run build --workspace @agency/dashboard
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 COPY --from=build /app/apps/dashboard/dist /usr/share/nginx/html
 RUN printf 'server {\n\
   listen 8080;\n\
