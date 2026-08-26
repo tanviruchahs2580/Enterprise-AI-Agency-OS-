@@ -1,3 +1,4 @@
+import { sha256Hex } from "@agency/core";
 import type {
   CodegenEngine,
   DeliverySpec,
@@ -5,7 +6,7 @@ import type {
   FileArtifact,
   GenerationResult,
 } from "./types.ts";
-import { emitModule, emitPackageJson, emitTests } from "./types.ts";
+import { emitModule, emitPackageJson, emitTests, emitReadme } from "./types.ts";
 
 /**
  * Deterministic offline code synthesis (GAP: autonomous delivery without
@@ -45,8 +46,10 @@ export class TemplateCodegen implements CodegenEngine {
       emitPackageJson(spec),
       emitModule(spec, opSymbol),
       emitTests(spec, cases),
+      emitReadme(spec, cases, opSymbol),
     ];
-    return { files, strategy: "template", tokensIn: 0, tokensOut: 0, costUsd: 0 };
+    const evidenceHash = sha256Hex(files.map((f) => f.path + "\n" + f.content).join("\n---\n"));
+    return { files, strategy: "template", tokensIn: 0, tokensOut: 0, costUsd: 0, evidenceHash };
   }
 
   async repair(

@@ -8,14 +8,16 @@ into a *merged, reviewed, tested commit* without human code edits.
 
 ```
 Task { description: DeliverySpec JSON }
-  ↓  POST /api/v1/delivery/runs {taskId, injectFault?, maxRepairAttempts}
+  ↓  POST /api/v1/delivery/runs {taskId, injectFault?, maxRepairAttempts?, testsTimeoutMs?, idempotencyKey?}
   ↓  execution row (queued) + job (type=deliver_task, idempotency key)
-  ↓  delivery-worker claims job (atomic conditional UPDATE)
+  ↓  PHASE 0 events: Governance.classified / Governance.gate / Governance.impact
+  ↓  PHASE 1 knowledge: EnrichedSpec · ADR · TestStrategy
 execution=running
   ↓  ensureProjectRepo(project)  — data/repos/<slug>-<id6> (clean main)
   ↓  GitWorktreeService.create(repo, taskId)  — branch agency/task-<id>
-Generation (pluggable CodegenEngine)
-  ↓  TemplateCodegen.generate(spec)  or  LlmCodegen via ModelRouter
+Generation (pluggable CodegenEngine, README auto-included)
+  ↓  TemplateCodegen.generate(spec)  or  LlmCodegen via ModelRouter   [evidenceHash]
+  ↓  static_analysis        — eval/require/io rules, fail-closed BLOCK
   ↓  [demo/self-heal proof] optionally flip one operator (injectFault)
   ↓  writeFiles(worktree, files)
 Test → Self-heal loop (maxRepairAttempts, default 2)
@@ -25,18 +27,23 @@ Test → Self-heal loop (maxRepairAttempts, default 2)
                                operandHintA/B}
        Codegen.repair(spec, files, failure) → targeted operator correction
        writeFiles(worktree, repaired) → re-test
+Contract + Performance gates
+  ↓  contract_verified      — exports == spec.ops (arity checked)
+  ↓  benchmark_run          — 20k iters/op in child process, budget <5ms avg
+  ↓  docs_generated         — README.md included in the delivery
 Review gate (deterministic)
   ↓  reviewDiff(files)  — secret-leak, TODO markers, debug code,
-     path safety, scope limits → APPROVE / REQUEST_CHANGES / BLOCK
-  ↓  REQUEST_CHANGES or BLOCK  → delivery blocked (no commit)
+      path safety, scope limits → APPROVE / REQUEST_CHANGES / BLOCK
 Commit → Merge
+  ↓  git add -A; staged-diff empty → converged (no commit needed)
   ↓  GitWorktreeService.commitAll(worktree, message)
   ↓  git merge --ff-only <branch> in main workspace
+Post-merge verification
+  ↓  postmerge_verified     — node --test re-runs on main; failure fails run
 Cleanup
-  ↓  remove worktree (branch retained as merged history)
-  ↓  execution=succeeded, quality_receipt (hash-chained), handoff
-     knowledge document, audit events (delivery.completed),
-     metrics counters advance, dashboard polls /delivery/runs/:id
+  ↓  remove worktree; SBOM knowledge doc; retrospective in handoff;
+     Promotion.staging_ready event; task state walk → completed
+     (fault demos stop at review); audit delivery.completed
 ```
 
 ## How to use

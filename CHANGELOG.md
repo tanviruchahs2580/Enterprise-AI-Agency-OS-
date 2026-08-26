@@ -2,6 +2,34 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.7.0] — 2026-08-26
+
+### Added — master-pipeline alignment (AGENCY_OS_MASTER_PROMPT v1.0)
+Delivery pipeline extended to the full governed lifecycle. New fail-closed stages
+(emitted as `Delivery.<stage>` events and asserted by ordered regression tests):
+- **static_analysis** — pre-test source gate on generated modules: eval /
+  new Function / dynamic require / io-network imports / prototype pollution → BLOCK.
+- **contract_verified** — exported surface must equal `spec.ops` exactly
+  (missing export, arity drift, undeclared export all block).
+- **benchmark_run** — out-of-process micro-benchmark (20k iterations per op,
+  absolute file-URL import); budget avg < 5 ms/op.
+- **docs_generated** — auto-generated `README.md` (API table, usage, quality notes)
+  is now part of every delivery commit.
+- **postmerge_verified** — after merge/converge, `node --test` re-runs on main;
+  failure fails the delivery even post-commit.
+Worker-side governance & knowledge (Phase 0/1/3/5):
+- `Governance.classified` / `Governance.gate` / `Governance.impact` events before execution.
+- Knowledge documents persisted per run: **EnrichedSpec**, **ADR**, **TestStrategy**,
+  per-delivery **SBOM** (content-addressable file hashes), plus handoff enriched with
+  `evidenceHash`, benchmark results, duration and a **retrospective**.
+- Clean builds walk the task state machine to **completed**
+  (ready→…→completed); fault-injected demo builds stop at review (human-in-the-loop).
+- `Promotion.staging_ready` event emitted; external promotion stays operator-gated.
+
+### Tests
+Suite grown to **77**: ordered-governance test, static-gate eval BLOCK,
+contract-mismatch BLOCK, convergence + post-merge interplay.
+
 ## [0.6.0] — 2026-08-26
 
 ### Fixed — V2.0 artifact-level validation findings

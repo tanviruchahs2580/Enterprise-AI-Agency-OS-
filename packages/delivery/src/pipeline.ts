@@ -11,6 +11,7 @@ import type { ReviewResult } from "./reviewer.ts";
 import { reviewDiff } from "./reviewer.ts";
 import { parseFailure } from "./diagnose.ts";
 import { runTests, writeFiles } from "./runner.ts";
+import { staticScan, contractCheck, runBenchmark } from "./gates.ts";
 
 export interface DeliveryPipelineOptions {
   /** Existing clean git repository (main workspace). */
@@ -30,13 +31,18 @@ export interface DeliveryPipelineOptions {
 export type DeliveryStage =
   | "worktree_created"
   | "code_generated"
+  | "static_analysis"
   | "fault_injected"
   | "tests_run"
   | "repair_attempted"
+  | "contract_verified"
+  | "benchmark_run"
+  | "docs_generated"
   | "review_completed"
   | "committed"
   | "merged"
   | "converged"
+  | "postmerge_verified"
   | "blocked"
   | "failed";
 
@@ -87,7 +93,20 @@ export async function runDeliveryPipeline(
       files: files.map((f) => f.path),
       tokensIn: gen.tokensIn,
       costUsd: gen.costUsd,
+      evidenceHash: gen.evidenceHash,
     });
+
+    // ---- static analysis & security gate (fail-closed, pre-test) ----
+    const staticFindings = staticScan(files);
+    record("static_analysis", { findings: staticFindings.length });
+    if (staticFindings.length > 0) {
+      record("blocked", { reason: "static analysis", findings: staticFindings });
+      return {
+        ok: false,
+        blocked: `static analysis: ${staticFindings[0]!.message} (${staticFindings[0]!.path})`,
+        stages, attempts, files, worktreePath: wt.path,
+      };
+    }
 
     if (opts.injectFault) {
       // simulate buggy agent output: break the FIRST op's operator
@@ -157,6 +176,32 @@ export async function runDeliveryPipeline(
       record("repair_attempted", { attempt, diagnosis: repaired.diagnosis });
     }
 
+    // ---- contract gate: exported surface must equal spec.ops ----
+    const contract = contractCheck(opts.spec, files);
+    record("contract_verified", { ok: contract.ok, problems: contract.problems });
+    if (!contract.ok) {
+      record("blocked", { reason: "contract mismatch" });
+      return {
+        ok: false, blocked: `contract mismatch: ${contract.problems[0]}`,
+        stages, attempts, files, worktreePath: wt.path,
+      };
+    }
+
+    // ---- performance micro-benchmark (out-of-process) ----
+    const bench = await runBenchmark(wt.path, opts.spec);
+    record("benchmark_run", { pass: bench.pass, results: bench.results });
+    if (!bench.pass) {
+      record("blocked", { reason: "benchmark budget exceeded" });
+      return {
+        ok: false, blocked: "benchmark budget exceeded",
+        stages, attempts, files, worktreePath: wt.path,
+      };
+    }
+
+    // ---- docs artifact confirmation (README generated at codegen) ----
+    const readme = files.find((f) => f.path === "README.md");
+    record("docs_generated", { readmeIncluded: Boolean(readme), bytes: readme?.content.length ?? 0 });
+
     // ---- Phase 7: automated review gate ----
     const finalDiffFiles = collectFinalFiles(wt.path, files);
     const review = reviewDiff(finalDiffFiles);
@@ -180,6 +225,12 @@ export async function runDeliveryPipeline(
       svc.remove(opts.repoPath, wt);
       worktreePath = undefined;
       record("converged", { branch: wt.branch, detail: "repaired output matches main; no net diff" });
+      // post-merge verification still runs against main (Phase 4.3)
+      const pm = await runTests(opts.repoPath, opts.testsTimeoutMs);
+      record("postmerge_verified", { passed: pm.passed, failed: pm.failed, target: "main" });
+      if (pm.failed > 0) {
+        return { ok: false, blocked: "post-merge verification failed on main", stages, attempts, review, files, mergedBranch: wt.branch, converged: true };
+      }
       return {
         ok: true,
         stages, attempts, review,
@@ -194,8 +245,19 @@ export async function runDeliveryPipeline(
     execGit(opts.repoPath, ["merge", "--ff-only", wt.branch]);
     record("merged", { branch: wt.branch });
 
+    // ---- Phase 4.3: post-merge verification on merged main ----
+    const pmMain = await runTests(opts.repoPath, opts.testsTimeoutMs);
+    record("postmerge_verified", { passed: pmMain.passed, failed: pmMain.failed, target: "main" });
+
     svc.remove(opts.repoPath, wt);
     worktreePath = undefined;
+
+    if (pmMain.failed > 0) {
+      return {
+        ok: false, blocked: `post-merge verification failed (${pmMain.failed} failing)`,
+        stages, attempts, review, files: finalDiffFiles, commitSha, mergedBranch: wt.branch,
+      };
+    }
 
     return {
       ok: true,

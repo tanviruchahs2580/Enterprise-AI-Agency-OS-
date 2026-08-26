@@ -155,6 +155,77 @@ test("CUSTOM CASES: spec-provided test vectors drive emitted tests and pass on m
   rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
 });
 
+test("MASTER PIPELINE GOVERNANCE: static gate, contract gate, benchmark, docs, post-merge — ordered and enforced", async () => {
+  const repo = freshRepo();
+  const stagesSeen: string[] = [];
+  const out = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_master",
+    spec: SPEC,
+    codegen: new TemplateCodegen(),
+    onStage: (s) => stagesSeen.push(s),
+  });
+  assert.equal(out.ok, true, `blocked: ${out.blocked}`);
+
+  // ordered enforcement of the extended pipeline
+  const order = ["code_generated", "static_analysis", "tests_run", "contract_verified", "benchmark_run", "docs_generated", "review_completed", "committed", "merged", "postmerge_verified"];
+  let cursor = -1;
+  for (const s of order) {
+    const i = stagesSeen.indexOf(s);
+    assert.ok(i > cursor, `${s} must occur after previous gate`);
+    cursor = i;
+  }
+  // auto-generated documentation artifact merged to main
+  assert.ok(existsSync(join(repo, "README.md")), "README.md generated");
+  const readme = readFileSync(join(repo, "README.md"), "utf8");
+  assert.match(readme, /## API/);
+  assert.match(readme, /\| `add` \| 2 \|/);
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
+test("STATIC GATE: generated code containing eval is fail-closed BLOCKED before any test runs", async () => {
+  const repo = freshRepo();
+  const evil = new TemplateCodegen();
+  const origGenerate = evil.generate.bind(evil);
+  evil.generate = async (spec) => {
+    const r = await origGenerate(spec);
+    r.files.push({
+      path: "src/dynamic.js",
+      content: "export function boom(expr) { return eval(expr); }\n",
+    });
+    return r;
+  };
+  const stagesSeen: string[] = [];
+  const out = await runDeliveryPipeline({
+    repoPath: repo, taskId: "tsk_eval", spec: SPEC, codegen: evil,
+    onStage: (s) => stagesSeen.push(s),
+  });
+  assert.equal(out.ok, false);
+  assert.match(out.blocked!, /static analysis/);
+  assert.ok(stagesSeen.includes("static_analysis"));
+  assert.ok(!stagesSeen.includes("tests_run"), "no tests may run after static BLOCK");
+  assert.ok(!existsSync(join(repo, "src")), "nothing merged");
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
+test("CONTRACT GATE: undeclared export or arity drift blocks the delivery", async () => {
+  const repo = freshRepo();
+  const lying = new TemplateCodegen();
+  const origGenerate = lying.generate.bind(lying);
+  lying.generate = async (spec) => {
+    const r = await origGenerate(spec);
+    r.files[1]!.content += "\nexport function sneaky(a) { return a; }\n";
+    return r;
+  };
+  const out = await runDeliveryPipeline({
+    repoPath: repo, taskId: "tsk_contract", spec: SPEC, codegen: lying,
+  });
+  assert.equal(out.ok, false);
+  assert.match(out.blocked!, /contract mismatch/);
+  assert.match(out.blocked!, /undeclared export: sneaky/);
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
 test("RE-DELIVERY CONVERGENCE: fault-injected second delivery of an already-correct module succeeds with no net diff and leaves no stale worktree", async () => {
   const repo = freshRepo();
   // First delivery merges correct code into main.

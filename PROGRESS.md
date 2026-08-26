@@ -2,6 +2,12 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.7.0 — AGENCY_OS master-pipeline alignment (2026-08-26)
+- [x] New fail-closed stages: static_analysis, contract_verified, benchmark_run, docs_generated, postmerge_verified
+- [x] Phase 0 governance events + Phase 1 knowledge (EnrichedSpec/ADR/TestStrategy) + SBOM + retrospective
+- [x] Clean builds walk task state to completed; fault demos stop at review; Promotion.staging_ready event
+- [x] Suite 77/77 · lint/typecheck green
+
 ## v0.6.0 — V2.0 Zero-Gap validation (2026-08-26)
 - [x] Artifact-level container validation caught P1: delivery workspace + git missing from image → FIXED,
       proven by in-container autonomous delivery (receipt + audit valid, non-root)

@@ -6,7 +6,7 @@ requirements, architecture, implementation, review, security, QA, deployment,
 observability and knowledge — with human approval gates, budgets, sandboxing and a
 tamper-evident audit trail.
 
-> Status: v0.6.0 — see [PROGRESS.md](PROGRESS.md) for the live build ledger. | [FINAL-EXECUTIVE-REPORT-v0.5.1](docs/FINAL-EXECUTIVE-REPORT-v0.5.1.md) | [PRODUCTION-CERTIFICATION-REPORT](docs/PRODUCTION-CERTIFICATION-REPORT.md)
+> Status: v0.7.0 — see [PROGRESS.md](PROGRESS.md) for the live build ledger. | [FINAL-EXECUTIVE-REPORT-v0.5.1](docs/FINAL-EXECUTIVE-REPORT-v0.5.1.md) | [PRODUCTION-CERTIFICATION-REPORT](docs/PRODUCTION-CERTIFICATION-REPORT.md)
 
 ## What it gives you
 
