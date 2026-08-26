@@ -59,6 +59,10 @@ export const configSchema = z.object({
   FEATURE_HERMES: Bool(false),
   FEATURE_VECTOR_KNOWLEDGE: Bool(false),
   FEATURE_GITHUB: Bool(false),
+  /** PHASE B2: enable LLM advisory reviewers (deterministic gates stay authoritative). */
+  FEATURE_LLM_REVIEWER: Bool(false),
+  /** PHASE B4: specialist agent handlers (pm/architect/sre) — default off. */
+  FEATURE_AGENT_SPECIALISTS: Bool(false),
   // ---- enterprise hardening (Phase 0) ----
   /** Secret resolution backend: 'env' (default) | 'mock' (tests) | future vault/aws-sm/doppler */
   SECRET_BACKEND: z.enum(["env", "mock"]).default("env"),

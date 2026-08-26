@@ -64,19 +64,49 @@ export interface BenchResult {
   avgMs: number;
 }
 
+/** PHASE B5: effective budget with clamps (spec-supplied values are untrusted). */
+export function resolvePerfBudget(spec: DeliverySpec): { avgMsPerOp: number; iterations: number } {
+  const raw = spec.perfBudget ?? {};
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const avg = Number.isFinite(raw.avgMsPerOp) ? clamp(raw.avgMsPerOp!, 0.01, 1000) : 5;
+  const iters = Number.isFinite(raw.iterations) ? clamp(Math.round(raw.iterations!), 100, 1_000_000) : 20_000;
+  return { avgMsPerOp: avg, iterations: iters };
+}
+
+export function validatePerfBudget(
+  input: unknown
+): { ok: true; clamped: { avgMsPerOp?: number; iterations?: number } } | { ok: false; reason: string } {
+  if (input === undefined) return { ok: true, clamped: {} };
+  if (typeof input !== "object" || input === null) return { ok: false, reason: "perfBudget must be an object" };
+  const b = input as { avgMsPerOp?: unknown; iterations?: unknown };
+  const out: { avgMsPerOp?: number; iterations?: number } = {};
+  if (b.avgMsPerOp !== undefined) {
+    const v = Number(b.avgMsPerOp);
+    if (!Number.isFinite(v) || v < 0.01 || v > 1000) return { ok: false, reason: "perfBudget.avgMsPerOp must be within [0.01,1000]" };
+    out.avgMsPerOp = v;
+  }
+  if (b.iterations !== undefined) {
+    const v = Number(b.iterations);
+    if (!Number.isInteger(v) || v < 100 || v > 1_000_000) return { ok: false, reason: "perfBudget.iterations must be integer within [100,1000000]" };
+    out.iterations = v;
+  }
+  return { ok: true, clamped: out };
+}
+
 /** Out-of-process micro-benchmark: never trusts generated code inside the agent. */
 export function runBenchmark(
   worktreePath: string,
   spec: DeliverySpec,
   timeoutMs = 60_000,
   transport: ExecTransport = processTransport
-): Promise<{ results: BenchResult[]; pass: boolean }> {
-  // Absolute file-URL import keeps the eval snippet cwd-independent.
+): Promise<{ results: BenchResult[]; budget: { avgMsPerOp: number; iterations: number }; pass: boolean }> {
+  const budget = resolvePerfBudget(spec);
+  const N = budget.iterations;
   const moduleUrl = pathToFileURL(join(worktreePath, "src", `${spec.moduleName}.js`)).href;
   const code = `
 const mod = await import(${JSON.stringify(moduleUrl)});
 const ops = ${JSON.stringify(spec.ops.map((o) => o.name))};
-const N = 20000;
+const N = ${N};
 const out = [];
 for (const name of ops) {
   const fn = mod[name];
@@ -95,7 +125,7 @@ console.log('BENCH_JSON:' + JSON.stringify(out));
   }).then((res) => {
     const line = res.stdout.split("\n").find((l) => l.startsWith("BENCH_JSON:"));
     const done = (results: BenchResult[]) =>
-      ({ results, pass: results.every((r) => Number.isFinite(r.avgMs) && r.avgMs < 5) });
+      ({ results, budget, pass: results.every((r) => Number.isFinite(r.avgMs) && r.avgMs < budget.avgMsPerOp) });
     if (!line) return done([]);
     try { return done(JSON.parse(line.slice("BENCH_JSON:".length))); } catch { return done([]); }
   });

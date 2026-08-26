@@ -4,6 +4,25 @@ This document describes the **closed-loop autonomous delivery engine** added in
 v0.5.0 (`packages/delivery`). It is the system that turns a *requirement*
 into a *merged, reviewed, tested commit* without human code edits.
 
+## Review gates
+
+Two layers, strict authority order:
+
+1. **Deterministic (AUTHORITY)** — `reviewDiff`: secrets, path-safety, debug-code,
+   scope limits → APPROVE / REQUEST_CHANGES / BLOCK.
+2. **LLM advisory (optional, `FEATURE_LLM_REVIEWER`)** — `makeAdvisoryReviewer`
+   returns findings capped at severity=major; merged via `mergeAdvisories`
+   (dedupe by rule+message). Advisory may only **worsen** APPROVE →
+   REQUEST_CHANGES; it can never clear a deterministic finding or BLOCK.
+   Failures/timeouts skip the advisory silently; cost recorded under
+   `advisory-review:<executionId>`.
+
+## Performance budget
+
+`spec.perfBudget` (PHASE B5): `{avgMsPerOp, iterations}` clamped to
+`[0.01,1000]` ms and `[100,1e6]` iterations. Effective budget echoed in
+`benchmark_run` stage detail; out-of-range values rejected at task creation.
+
 ## Lifecycle (wired end-to-end)
 
 ```

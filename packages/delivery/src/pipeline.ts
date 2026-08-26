@@ -7,8 +7,8 @@ import type {
   DeliverySpec,
   FileArtifact,
 } from "./types.ts";
-import type { ReviewResult } from "./reviewer.ts";
-import { reviewDiff } from "./reviewer.ts";
+import type { ReviewResult, ReviewFinding } from "./reviewer.ts";
+import { reviewDiff, mergeAdvisories } from "./reviewer.ts";
 import { parseFailure } from "./diagnose.ts";
 import { runTests, writeFiles } from "./runner.ts";
 import { staticScan, contractCheck, runBenchmark } from "./gates.ts";
@@ -27,6 +27,8 @@ export interface DeliveryPipelineOptions {
   testsTimeoutMs?: number;
   /** Phase A/F-04: execution transport for generated code (default process). */
   transport?: ExecTransport;
+  /** PHASE B2: optional LLM advisory reviewer (flag-gated by caller). */
+  advisory?: (diffSummary: string) => Promise<ReviewFinding[]>;
   /** Progress/observability callback. */
   onStage?: (stage: string, detail: Record<string, unknown>) => void;
 }
@@ -209,7 +211,17 @@ export async function runDeliveryPipeline(
 
     // ---- Phase 7: automated review gate ----
     const finalDiffFiles = collectFinalFiles(wt.path, files);
-    const review = reviewDiff(finalDiffFiles);
+    let review = reviewDiff(finalDiffFiles);
+    // PHASE B2: advisory merge — may only worsen, never improve/BLOCK
+    if (opts.advisory) {
+      try {
+        const summary = finalDiffFiles.map((f) => `${f.path} (${f.content.split("\n").length} lines)`).join("\n");
+        const advisory = await opts.advisory(summary);
+        review = mergeAdvisories(review, advisory);
+      } catch {
+        /* advisory failure never blocks delivery */
+      }
+    }
     record("review_completed", { verdict: review.verdict, findings: review.findings.length });
     if (review.verdict !== "APPROVE") {
       return {

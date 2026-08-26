@@ -8,15 +8,15 @@ iteration cap, timeout and budget.
 |---|---|---|---|---|
 | principal | PRINCIPAL | REASONING | $5 | vision, approvals, escalations |
 | captain | ORCHESTRATOR | REASONING | $5 | decomposition & dispatch, 40 iters |
-| product-manager | PRODUCT | STANDARD | $5 | PRD, stories, acceptance criteria |
-| requirements-engineer | PRODUCT | STANDARD | $5 | SRS, edge cases, Definition of Ready |
-| architect | ARCHITECTURE | REASONING | $5 | C4, ADRs, threat models |
+| product-manager | PRODUCT | STANDARD | $5 | PRD, stories, acceptance criteria (wired: pm_decompose) |
+| requirements-engineer | PRODUCT | STANDARD | $5 | SRS, edge cases, Definition of Ready (wired: DoR warnings on task create) |
+| architect | ARCHITECTURE | REASONING | $5 | C4, ADRs, threat models (wired: modify-mode ADR drafts) |
 | staff-engineer | ENGINEERING | REASONING | $5 | deep modules, cross-cutting refactors |
 | frontend-engineer | ENGINEERING | STANDARD | $5 | accessible UIs + e2e checks |
 | backend-engineer | ENGINEERING | STANDARD | $5 | APIs/services with TDD |
 | database-engineer | DATA | STANDARD | $5 | reversible migrations only |
 | devops-engineer | PLATFORM | STANDARD | $5 | CI/CD, IaC; staging deploys |
-| sre | PLATFORM | STANDARD | $5 | SLOs, runbooks, error budgets |
+| sre | PLATFORM | STANDARD | $5 | SLOs, runbooks, error budgets (wired: post-deploy SLO stubs) |
 | qa-engineer | QUALITY | STANDARD | $5 | coverage ≥80/60 gate ownership |
 | security-engineer | SECURITY | SECURITY | $5 | threat modeling, finding triage |
 | performance-engineer | QUALITY | STANDARD | $5 | benchmarks before/after |

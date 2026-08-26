@@ -3,6 +3,7 @@ export * from "./codeng.ts";
 export * from "./agentic.ts";
 export * from "./gates.ts";
 export * from "./exec-transport.ts";
+export * from "./llm-codegen.ts";
 export * from "./reviewer.ts";
 export * from "./runner.ts";
 export * from "./diagnose.ts";

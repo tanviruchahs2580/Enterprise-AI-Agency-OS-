@@ -2,6 +2,36 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.9.0] — 2026-08-26
+
+### Added — MASTER UPGRADE PHASE B (governance & agent intelligence, B1–B5)
+- **B1 Genuine governance engine** (F-07): pure `evaluateGovernance()` in
+  orchestration — real budget check via BudgetGuard, ownership/status checks,
+  complexity classification (simple/module/service), modify→medium risk.
+  Service-complexity deliveries auto-create a `delivery:auto` approval and
+  BLOCK until decided (execution failed w/ APPROVAL_REQUIRED). Hardcoded
+  ALLOW strings removed from the worker path.
+- **B2 LLM advisory reviewers** (`FEATURE_LLM_REVIEWER`, default off):
+  deterministic `reviewDiff` remains the sole AUTHORITY — advisory findings
+  capped at major, deduped, may only worsen APPROVE→REQUEST_CHANGES; provider
+  failures/timeouts skip silently; cost recorded as `advisory-review:<execId>`.
+- **B3 LlmCodegen v2**: `spec.codegen='llm'` + semantics.examples drive
+  model-generated modules with deterministic example-tests; fenced-output
+  extraction with export/arity validation → clean VALIDATION block on
+  malformed output; repair feeds diagnose info back to the model.
+- **B4 Specialist handlers** (`FEATURE_AGENT_SPECIALISTS`, default off):
+  `pm_decompose` job (stories doc), Definition-of-Ready warnings on task
+  create, architect ADR drafts on modify-mode dispatches, SRE SLO stubs on
+  deployment success. AGENTS.md roster marked wired for these four.
+- **B5 Configurable perf budget**: `spec.perfBudget` clamped
+  ([0.01,1000]ms / [100,1e6] iter), rejected at task creation when invalid;
+  effective budget echoed in `benchmark_run`.
+
+### Tests
+Suite grown to **111/111** (governance matrix, advisory merge/worsen-only,
+LLM generate/repair/malformed, perfBudget validator + tight/loose runs,
+specialist handlers).
+
 ## [0.8.1] — 2026-08-26
 
 ### Fixed — MASTER UPGRADE PHASE A (P0 security hardening, A1–A7)

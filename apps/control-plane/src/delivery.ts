@@ -103,22 +103,80 @@ export async function executeDelivery(
 
   const repoPath = ensureProjectRepo(ctx, opts.orgId, opts.projectId);
 
-  // ================= PHASE 0 — pre-dispatch governance =================
+  // ================= PHASE 0 — genuine governance evaluation =================
   const startedAtMs = Date.now();
   const opsCount = Array.isArray(s.ops) ? s.ops.length : 0;
-  const complexity = opsCount <= 2 ? "simple" : opsCount <= 4 ? "module" : "service";
-  const impactMode = existsSync(join(repoPath, "src", `${s.moduleName}.js`)) ? "modify" : "create";
+  const impactMode: "create" | "modify" =
+    existsSync(join(repoPath, "src", `${s.moduleName}.js`)) ? "modify" : "create";
+
+  const budgetCheck = ctx.budget.check(0, {
+    orgId: opts.orgId, projectId: opts.projectId, taskId: opts.taskId,
+  });
+  const { evaluateGovernance } = await import("@agency/orchestration");
+  const gov = evaluateGovernance({
+    taskStatus: String(task?.status ?? ""),
+    orgIdMatches: true,
+    impactMode,
+    opsCount,
+    budgetCheck,
+  });
+
   ctx.bus.emit({ type: "Governance.classified", orgId: opts.orgId, actorType: "system", actorId: "delivery-worker",
-    payload: { executionId: opts.executionId, complexity, riskLevel: "low", estimatedCostUsd: 0, opsCount } });
+    payload: { executionId: opts.executionId, complexity: gov.complexity, riskLevel: gov.riskLevel, estimatedCostUsd: 0, opsCount } });
   ctx.bus.emit({ type: "Governance.gate", orgId: opts.orgId, actorType: "system", actorId: "delivery-worker",
-    payload: { executionId: opts.executionId, decision: "ALLOW", rbac: "task:dispatch ok", dailyBudget: "within limit" } });
+    payload: { executionId: opts.executionId, decision: gov.decision, reasons: gov.reasons, budgetCheck: gov.budgetCheck, requiresApproval: gov.requiresApproval } });
   ctx.bus.emit({ type: "Governance.impact", orgId: opts.orgId, actorType: "system", actorId: "delivery-worker",
-    payload: { executionId: opts.executionId, mode: impactMode, breakingRisk: impactMode === "modify" ? "medium" : "none",
+    payload: { executionId: opts.executionId, mode: gov.impactMode, breakingRisk: gov.impactMode === "modify" ? "medium" : "none",
       safeguards: ["contract gate", "post-merge verification"] } });
+
+  if (gov.requiresApproval) {
+    const apr = ctx.approvals.request({
+      orgId: opts.orgId, projectId: opts.projectId,
+      action: "delivery:auto", resourceType: "execution", resourceId: opts.executionId,
+      reason: `service-complexity delivery (${opsCount} ops)`,
+      riskLevel: "high", requestedBy: "delivery-worker",
+    });
+    ctx.db.updateById("executions", opts.executionId, {
+      status: "failed", finished_at: ctx.db.now(),
+      error_code: "APPROVAL_REQUIRED",
+      output_summary: `blocked by governance: ${gov.reasons.join("; ")}. approval=${apr.id}`,
+    });
+    ctx.audit.append({
+      orgId: opts.orgId, actorType: "agent", actorId: "delivery-worker",
+      action: "delivery.blocked", resourceType: "execution", resourceId: opts.executionId,
+      riskLevel: "high", decision: "deny", result: "failure",
+      metadata: { taskId: opts.taskId, reasons: gov.reasons, approvalId: apr.id },
+    });
+    return { executionId: opts.executionId, ok: false,
+      blocked: `governance BLOCK: ${gov.reasons.join("; ")}` } as never;
+  }
+
+  if (gov.decision === "BLOCK") {
+    ctx.db.updateById("executions", opts.executionId, {
+      status: "failed", finished_at: ctx.db.now(),
+      error_code: "GOVERNANCE_BLOCKED",
+      output_summary: `blocked by governance: ${gov.reasons.join("; ")}`,
+    });
+    ctx.audit.append({
+      orgId: opts.orgId, actorType: "agent", actorId: "delivery-worker",
+      action: "delivery.blocked", resourceType: "execution", resourceId: opts.executionId,
+      riskLevel: "high", decision: "deny", result: "failure",
+      metadata: { taskId: opts.taskId, reasons: gov.reasons },
+    });
+    throw new AppError("DEPENDENCY_UNAVAILABLE", `governance BLOCK: ${gov.reasons.join("; ")}`);
+  }
 
   // ================= PHASE 1 — spec enrichment / ADR / test strategy =====
   const vectorTotal = (Array.isArray(s.ops) ? (s.ops as { cases?: unknown[] }[]) : []).reduce(
     (n: number, o: { cases?: unknown[] }) => n + (Array.isArray(o.cases) ? o.cases.length : 1), 0);
+
+  if (ctx.config.FEATURE_AGENT_SPECIALISTS && impactMode === "modify") {
+    const { architectAdrDraft } = await import("./specialists.ts");
+    architectAdrDraft(ctx, {
+      orgId: opts.orgId, projectId: opts.projectId, taskId: opts.taskId, moduleName: s.moduleName,
+    });
+  }
+
   const knw = (kind: string, title: string, obj: Record<string, unknown>, tagsExtra: string[] = []) => {
     ctx.db.insert("knowledge_documents", {
       id: newId("knw"), org_id: opts.orgId, project_id: opts.projectId,
@@ -160,7 +218,7 @@ export async function executeDelivery(
   });
 
   const { runDeliveryPipeline } = await import("@agency/delivery");
-  const { selectEngine, selectTransport } = await import("@agency/delivery");
+  const { selectEngine, selectTransport, LlmCodegen } = await import("@agency/delivery");
 
   // PHASE A/F-04: route generated-code execution through configured sandbox.
   const transport = selectTransport(
@@ -168,11 +226,42 @@ export async function executeDelivery(
     process.env.AGENT_EXEC_CONTAINER_ID
   );
 
-  // PHASE 1.1 dual-mode: spec.mode routes engines; agentic requires
-  // MODEL_PROVIDER_API_KEY (fail-closed DEPENDENCY_UNAVAILABLE).
-  const codegen = selectEngine(s as { mode?: "deterministic" | "agentic" }, {
-    hasModelKey: Boolean(ctx.config.MODEL_PROVIDER_API_KEY),
-  });
+  // PHASE 1.1 + B3 engine selection:
+  //   spec.codegen='llm' + provider → LlmCodegen (router-backed)
+  //   else dual-mode via selectEngine (agentic requires key; deterministic default)
+  const hasModelKey = Boolean(ctx.config.MODEL_PROVIDER_API_KEY);
+  let codegen;
+  if ((s as { codegen?: string }).codegen === "llm" && hasModelKey) {
+    codegen = new LlmCodegen(async (messages, maxTokens) => {
+      const completion = await ctx.router.complete(
+        { messages, maxTokens },
+        { tier: "STANDARD" } as never
+      );
+      return completion.content;
+    });
+  } else {
+    codegen = selectEngine(s as { mode?: "deterministic" | "agentic" }, { hasModelKey });
+  }
+
+  // PHASE B2 advisory reviewer: only when flag AND real provider; failures skip.
+  let advisory;
+  if (ctx.config.FEATURE_LLM_REVIEWER && hasModelKey) {
+    const { makeAdvisoryReviewer } = await import("@agency/delivery");
+    advisory = makeAdvisoryReviewer({
+      complete: async (prompt: string) => {
+        const c = await ctx.router.complete(
+          { messages: [{ role: "user", content: prompt }], maxTokens: 512 },
+          { tier: "REVIEW" } as never
+        );
+        ctx.budget.recordSpend(0.001, {
+          orgId: opts.orgId, projectId: opts.projectId, taskId: opts.taskId,
+          reason: `advisory-review:${opts.executionId}`,
+        });
+        return c.content;
+      },
+      spec: s as never,
+    });
+  }
 
   const out = await runDeliveryPipeline({
     repoPath,
@@ -180,6 +269,7 @@ export async function executeDelivery(
     spec: spec as never,
     codegen,
     transport,
+    advisory,
     injectFault: opts.injectFault,
     maxRepairAttempts: opts.maxRepairAttempts ?? 2,
     testsTimeoutMs: opts.testsTimeoutMs,

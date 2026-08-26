@@ -185,7 +185,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.8.1",
+    version: "0.9.0",
     apiVersion: "v1",
     features: featureFlags(ctx),
     docs: "/docs",
@@ -400,6 +400,12 @@ export function buildApp(ctx: AppContext): FastifyInstance {
           "deliverySpec must be {kind:'delivery', moduleName:string, ops:[{name,arity,cases?}]}");
       }
       description = JSON.stringify(s);
+      // PHASE B5: perfBudget range validation at the boundary
+      if ((s as { perfBudget?: unknown }).perfBudget !== undefined) {
+        const { validatePerfBudget } = await import("@agency/delivery");
+        const v = validatePerfBudget((s as { perfBudget?: unknown }).perfBudget);
+        if (!v.ok) throw new AppError("VALIDATION_ERROR", v.reason);
+      }
     }
     const t = ctx.tasks.create({
       orgId: me.orgId,
@@ -413,7 +419,12 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       dependsOn: Array.isArray(body.dependsOn) ? body.dependsOn.map(String) : [],
     });
     auditEvent(ctx, me, "task.created", "task", t.id, "low");
-    publishEvent(ctx, me.orgId, me, "TaskCreated", { taskId: t.id });
+    // PHASE B4: Definition-of-Ready warnings ride the event payload
+    {
+      const { reqReadinessCheck } = await import("./specialists.ts");
+      const warnings = reqReadinessCheck({ title: String(body.title), description: description });
+      publishEvent(ctx, me.orgId, me, "TaskCreated", { taskId: t.id, warnings });
+    }
     reply.code(201);
     return t;
   });
@@ -963,6 +974,15 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       id: cryptoRandomId("devt"), deployment_id: id, event: "succeeded", at: ctx.db.now(), payload: "{}",
     });
     publishEvent(ctx, me.orgId, me, "DeploymentSucceeded", { deploymentId: id });
+    // PHASE B4: SRE post-deploy operational stub (flag-gated)
+    if (ctx.config.FEATURE_AGENT_SPECIALISTS) {
+      const { srePostDeployCheck } = await import("./specialists.ts");
+      const dep = ctx.db.get<{ project_id: string }>("SELECT project_id FROM deployments WHERE id=?", [id]);
+      srePostDeployCheck(ctx, {
+        orgId: me.orgId, deploymentId: id,
+        projectId: dep ? String(dep.project_id) : undefined,
+      });
+    }
     return { ok: true };
   });
 

@@ -1,4 +1,5 @@
 import type { AppContext } from "./context.ts";
+import { pmDecompose } from "./specialists.ts";
 
 /**
  * Background worker handlers. Long-running operations run here, never inside
@@ -7,6 +8,22 @@ import type { AppContext } from "./context.ts";
  * persists the artifact + token/cost accounting on the execution row.
  */
 export function registerWorkers(ctx: AppContext): void {
+  // PHASE B4 (flag-gated): specialist handlers
+  if (ctx.config.FEATURE_AGENT_SPECIALISTS) {
+    ctx.jobs.register("pm_decompose", async (job) => {
+      const data = (job.payload as { data?: { taskId?: string } }).data ?? {};
+      const task = ctx.db.get<{ id: string; title: string; description: string; project_id: string; org_id: string }>(
+        "SELECT id, title, description, project_id, org_id FROM tasks WHERE id=?",
+        [String(data.taskId ?? "")]
+      );
+      if (!task) throw new Error("pm_decompose: task not found");
+      pmDecompose(ctx, {
+        orgId: task.org_id, projectId: task.project_id, taskId: task.id,
+        title: task.title, description: task.description,
+      });
+    });
+  }
+
   ctx.jobs.register("execute_task", async (job) => {
     // payload shape (set by enqueue): { orgId, type, data: { executionId } }
     const data = (job.payload as { data?: { executionId?: string } }).data ?? {};

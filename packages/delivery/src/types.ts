@@ -22,12 +22,22 @@ export interface DeliverySpec {
   namespace?: string;
   /** PHASE 1.1: deterministic (default, offline) | agentic (LLM tool-loop) */
   mode?: "deterministic" | "agentic";
+  /** PHASE B5: per-delivery performance budget (clamped by engine). */
+  perfBudget?: { avgMsPerOp?: number; iterations?: number };
+  /** PHASE B3: explicit engine override. */
+  codegen?: "template" | "llm";
   ops: {
     name: string;
     arity: 2;
     /** Optional explicit test vectors [a, b, expected]. When omitted the
-     *  engine picks canonical cases per op-name semantics (add/mul/sub). */
+     *  engine picks canonical cases per op-name semantics (add/mul/sub) —
+     *  or, for LLM codegen, semantics.examples drive generated tests. */
     cases?: [number, number, number][];
+    /** PHASE B3: semantic description + examples drive LLM codegen & tests. */
+    semantics?: {
+      description: string;
+      examples: { args: number[]; returns: number | string }[];
+    };
   }[];
 }
 

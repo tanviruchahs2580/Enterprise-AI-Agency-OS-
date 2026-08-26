@@ -1,4 +1,4 @@
-import type { FileArtifact } from "./types.ts";
+import type { DeliverySpec, FileArtifact } from "./types.ts";
 
 export type ReviewVerdict = "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 
@@ -75,10 +75,65 @@ export function reviewDiff(
   }
 
   const blockers = findings.filter((f) => f.severity === "blocker");
-  const majors = findings.filter((f) => f.severity === "major");
   let verdict: ReviewVerdict = "APPROVE";
   if (blockers.length > 0) verdict = "BLOCK";
-  else if (majors.length > 0) verdict = "REQUEST_CHANGES";
+  else if (findings.some((f) => f.severity === "major")) verdict = "REQUEST_CHANGES";
 
   return { verdict, findings };
+}
+
+/**
+ * PHASE B2 — LLM advisory layer (flag-gated by the caller).
+ * Deterministic reviewDiff stays the AUTHORITY: advisory findings may only
+ * WORSEN the verdict (APPROVE → REQUEST_CHANGES), never improve it, and can
+ * never introduce BLOCK. Deduped against base by rule+path.
+ */
+export function mergeAdvisories(
+  base: ReviewResult,
+  advisory: ReviewFinding[]
+): ReviewResult {
+  const seen = new Set(base.findings.map((f) => `${f.rule}|${f.message}`));
+  const mergedFindings = [...base.findings];
+  for (const a of advisory) {
+    if (a.severity === "blocker") continue; // advisory can never BLOCK
+    const key = `${a.rule}|${a.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedFindings.push(a);
+  }
+  const majors = mergedFindings.filter((f) => f.severity === "major").length;
+  let verdict: ReviewVerdict = base.verdict;
+  if (verdict === "APPROVE" && majors > 0) {
+    verdict = "REQUEST_CHANGES"; // worsen only
+  }
+  return { verdict, findings: mergedFindings };
+}
+
+/** Builds the advisory callback used by the pipeline when flag+provider exist. */
+export function makeAdvisoryReviewer(opts: {
+  complete: (prompt: string) => Promise<string>;
+  spec: DeliverySpec;
+}): (diffSummary: string) => Promise<ReviewFinding[]> {
+  return async (diffSummary: string): Promise<ReviewFinding[]> => {
+    const raw = await Promise.race([
+      opts.complete(
+        `You are an advisory code reviewer. Review this diff summary for module '${opts.spec.moduleName}'. ` +
+        `Return ONLY a JSON array of findings [{severity:"minor"|"major", rule:string, path:string, message:string}]. ` +
+        `Severity must never be blocker. Diff summary:\n${diffSummary}`
+      ),
+      new Promise<string>((_, rej) => setTimeout(() => rej(new Error("advisory timeout")), 30_000)),
+    ]);
+    const m = /\[[\s\S]*\]/.exec(raw);
+    if (!m) return [];
+    const arr = JSON.parse(m[0]) as { severity?: string; rule?: string; path?: string; message?: string }[];
+    return (Array.isArray(arr) ? arr : [])
+      .filter((x) => x && (x.severity === "major" || x.severity === "minor"))
+      .slice(0, 20)
+      .map((x) => ({
+        severity: x.severity as "major" | "minor",
+        rule: String(x.rule ?? "llm-advisory"),
+        message: String(x.message ?? "").slice(0, 300),
+        path: String(x.path ?? opts.spec.moduleName).replace(/\.\./g, ""),
+      }));
+  };
 }

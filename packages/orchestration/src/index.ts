@@ -1,4 +1,5 @@
 export * from "./agents.ts";
+export * from "./governance.ts";
 export * from "./statemachine.ts";
 export * from "./tasks.ts";
 export * from "./sandbox.ts";

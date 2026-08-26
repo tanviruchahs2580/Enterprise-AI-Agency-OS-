@@ -2,6 +2,14 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.9.0 — MASTER UPGRADE PHASE B complete (2026-08-26)
+- [x] B1 genuine governance engine (budget/ownership/status computed; service-complexity auto-approval BLOCK)
+- [x] B2 LLM advisory reviewers behind FEATURE_LLM_REVIEWER (worsen-only, fail-open, cost-tagged)
+- [x] B3 LlmCodegen v2 (semantics.examples → deterministic example-tests; fenced extraction; model repair)
+- [x] B4 specialists wired (pm_decompose job · DoR warnings · modify-ADR drafts · SRE SLO stubs) + roster markers
+- [x] B5 perfBudget spec w/ clamps + boundary rejection
+- [x] Suite **111/111** · lint/typecheck green · tag `upgrade/phase-b-complete`
+
 ## v0.8.1 — MASTER UPGRADE PHASE A complete (2026-08-26)
 - [x] A1 approval single-use+expiry (0002 migration, consume-on-read, sweeper) — 3 tests
 - [x] A2 atomic idempotency (0003 unique indexes, INSERT-first routes+enqueue, 10-way race e2e)
