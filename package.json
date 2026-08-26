@@ -23,8 +23,8 @@
     "seed": "node scripts/seed.mjs"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "eslint": "^9.33.0",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.9.0",
     "playwright": "^1.62.1",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.40.0"
