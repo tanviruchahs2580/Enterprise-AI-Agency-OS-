@@ -5,6 +5,7 @@ import App from "./App.tsx";
 import Overview from "./pages/Overview.tsx";
 import Projects from "./pages/Projects.tsx";
 import Tasks from "./pages/Tasks.tsx";
+import Delivery from "./pages/Delivery.tsx";
 import Agents from "./pages/Agents.tsx";
 import Models from "./pages/Models.tsx";
 import Security from "./pages/Security.tsx";
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
       { index: true, element: <Overview /> },
       { path: "projects", element: <Projects /> },
       { path: "tasks", element: <Tasks /> },
+      { path: "delivery", element: <Delivery /> },
       { path: "agents", element: <Agents /> },
       { path: "models", element: <Models /> },
       { path: "security", element: <Security /> },

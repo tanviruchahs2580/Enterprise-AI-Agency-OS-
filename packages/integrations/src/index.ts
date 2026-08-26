@@ -75,10 +75,18 @@ export class GitHubAdapter {
 
 /** HMAC-signed outbound webhook emitter with bounded retries (blueprint §5/§72). */
 export class SignedWebhookEmitter {
-  constructor(private opts: { url?: string; secret?: string }) {}
+  private readonly url?: string;
+  private readonly secret?: string;
+
+  // NOTE: no TS parameter properties — Node native type-stripping rejects them
+  // (ADR-0003 failure log); explicit fields keep this package runtime-loadable.
+  constructor(opts: { url?: string; secret?: string }) {
+    this.url = opts.url;
+    this.secret = opts.secret;
+  }
 
   sign(payload: string, timestamp: string): string {
-    const secret = this.opts.secret;
+    const secret = this.secret;
     if (!secret) throw new AppError("VALIDATION_ERROR", "webhook secret not configured");
     return createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
   }
@@ -93,12 +101,12 @@ export class SignedWebhookEmitter {
   }
 
   async emit(eventType: string, payload: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<boolean> {
-    if (!this.opts.url || !this.opts.secret) return false; // disabled
+    if (!this.url || !this.secret) return false; // disabled
     const body = JSON.stringify({ type: eventType, payload, ts: new Date().toISOString() });
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const ts = Math.floor(Date.now() / 1000).toString();
-        const res = await fetchImpl(this.opts.url, {
+        const res = await fetchImpl(this.url, {
           method: "POST",
           headers: {
             "content-type": "application/json",

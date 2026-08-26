@@ -545,6 +545,63 @@ test("APPROVAL RACE: concurrent decisions â€” exactly one wins", async () =
   const codes = results.map((r) => r.status).sort();
   assert.deepEqual(codes, [200, 409]); // one decision lands, the other conflicts
 });
+test("DELIVERY SPEC FIELD: structured body serializes to worker-readable description", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Spec Field " + Date.now() });
+  const bad = await api("POST", "/api/v1/tasks", {
+    projectId: prj.body.id, title: "bad spec",
+    deliverySpec: { kind: "nonsense" },
+  });
+  assert.equal(bad.status, 400);
+  const ok = await api("POST", "/api/v1/tasks", {
+    projectId: prj.body.id, title: "good spec",
+    deliverySpec: {
+      kind: "delivery", moduleName: "widget",
+      ops: [{ name: "add", arity: 2, cases: [[2, 3, 5]] }],
+    },
+  });
+  assert.equal(ok.status, 201);
+  const row = ctx.db.get<{ description: string }>(
+    "SELECT description FROM tasks WHERE id = ?", [ok.body.id]
+  );
+  const parsed = JSON.parse(String(row!.description)) as { kind?: string };
+  assert.equal(parsed.kind, "delivery");
+});
+
+test("DELIVERY RUNS: client idempotency key replays original dispatch; list endpoint exposes runs", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Runs List " + Date.now() });
+  const t = await api("POST", "/api/v1/tasks", {
+    projectId: prj.body.id, title: "Implement widget",
+    deliverySpec: { kind: "delivery", moduleName: "widget", ops: [{ name: "add", arity: 2 }] },
+  });
+  await api("POST", `/api/v1/tasks/${t.body.id}/transition`, { to: "ready" });
+  const first = await api("POST", "/api/v1/delivery/runs", {
+    taskId: t.body.id, idempotencyKey: "e2e-dl-key-1",
+  });
+  assert.equal(first.status, 202);
+  const replay = await api("POST", "/api/v1/delivery/runs", {
+    taskId: t.body.id, idempotencyKey: "e2e-dl-key-1",
+  });
+  assert.equal(replay.status, 200); // replayed
+  assert.equal(String(replay.body.executionId), String(first.body.executionId));
+
+  const list = await api("GET", "/api/v1/delivery/runs?limit=50");
+  assert.equal(list.status, 200);
+  const items = (list.body.items as Record<string, unknown>[]) ?? [];
+  assert.ok(items.some((r) => r.executionId === first.body.executionId), "dispatched run listed");
+  const row = items.find((r) => r.executionId === first.body.executionId)!;
+  assert.equal(row.taskTitle, "Implement widget");
+});
+
+test("KNOWLEDGE DEFAULT VIEW: empty query returns recent documents", async () => {
+  await api("POST", "/api/v1/knowledge", {
+    kind: "fact", title: "Default View Probe " + Date.now(), content: "recent docs visible",
+  });
+  const res = await api("GET", "/api/v1/knowledge/search");
+  assert.equal(res.status, 200);
+  const items = (res.body.items as unknown[]) ?? [];
+  assert.ok(items.length > 0, "default view lists recent docs");
+});
+
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {
   ctx.db.driver.close(); // simulate database loss
   const r = await app.inject({ method: "GET", url: "/ready" });

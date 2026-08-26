@@ -30,6 +30,7 @@ export function registerDeliveryWorkers(ctx: AppContext): void {
         executionId,
         injectFault: Boolean(data.injectFault),
         maxRepairAttempts: data.maxRepairAttempts ? Number(data.maxRepairAttempts) : 2,
+        testsTimeoutMs: data.testsTimeoutMs ? Number(data.testsTimeoutMs) : undefined,
       });
     } catch (e) {
       if (e instanceof AppError && e.code === "VALIDATION_ERROR") {

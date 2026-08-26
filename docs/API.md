@@ -26,7 +26,7 @@ Errors: `{ "error": { code, message, requestId, retryable, details? } }`
 
 | Method | Path | Permission |
 |---|---|---|
-| POST | /tasks {projectId, title, dependsOn?[], priority?} | task:create |
+| POST | /tasks {projectId, title, description?} **or** {projectId, title, deliverySpec:{kind:'delivery',moduleName,ops:[{name,arity,cases?}]}}, dependsOn?, priority? | task:create |
 | GET | /tasks?projectId&status?&cursor?&limit? | project:read |
 | GET | /projects/:id/tasks/ready | project:read |
 | POST | /tasks/:id/transition {to} | task:update |
@@ -35,6 +35,23 @@ Errors: `{ "error": { code, message, requestId, retryable, details? } }`
 Task states: draft→ready→planned→in_progress→review→qa→security→approval→
 deploying→deployed→monitoring→completed (+ blocked/failed/rollback_required/cancelled).
 Illegal transitions → `409 CONFLICT`. Dependencies are cycle-checked at creation.
+When `deliverySpec` is provided it is validated server-side and serialized into the
+task description consumed by `POST /delivery/runs`.
+
+## Autonomous delivery runs
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | /delivery/runs {taskId, injectFault?, maxRepairAttempts?, testsTimeoutMs?, idempotencyKey?} → 202 queued (200 replayed on idempotency-key match) | task:dispatch | executes worktree→codegen→tests→self-heal→review→merge; emits optional HMAC webhook on completion |
+| GET | /delivery/runs?limit= → {items:[{executionId,taskId,taskTitle,status,traceId,summary,errorCode,receipt,createdAt,finishedAt}]} | execution:read | recent runs, receipt = hash-chained quality receipt present |
+| GET | /delivery/runs/:id → {execution, task} | execution:read | single run incl. quality receipt |
+
+## Knowledge
+
+| Method | Path | Permission |
+|---|---|---|
+| POST | /knowledge {kind, title, content, tags?, confidence?} | knowledge:write |
+| GET | /knowledge/search?q= — empty q returns 25 most recent docs (`defaultView:true`) | knowledge:read |
 
 ## Agents & executions
 

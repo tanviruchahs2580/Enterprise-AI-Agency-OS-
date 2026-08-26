@@ -128,6 +128,33 @@ test("BUDGET GATE: unparseable failure safely blocks instead of looping forever"
   rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
 });
 
+test("CUSTOM CASES: spec-provided test vectors drive emitted tests and pass on merged main", async () => {
+  const repo = freshRepo();
+  const spec: DeliverySpec = {
+    kind: "delivery",
+    moduleName: "vecmath",
+    ops: [
+      { name: "add", arity: 2, cases: [[2, 3, 5], [10, -4, 6]] },
+      { name: "mul", arity: 2, cases: [[4, 5, 20]] },
+    ],
+  };
+  const out = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_custom",
+    spec,
+    codegen: new TemplateCodegen(),
+  });
+  assert.equal(out.ok, true, `blocked: ${out.blocked}`);
+  const tests = readFileSync(join(repo, "test", "vecmath.test.js"), "utf8");
+  assert.match(tests, /add\(2, 3\) === 5/);
+  assert.match(tests, /add\(10, -4\) === 6/);
+  assert.match(tests, /mul\(4, 5\) === 20/);
+  // all three vectors actually ran green on merged main
+  const t = execFileSync(process.execPath, ["--test"], { cwd: repo, encoding: "utf8", env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT")) });
+  assert.match(t, /pass 3/);
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
 test("RE-DELIVERY CONVERGENCE: fault-injected second delivery of an already-correct module succeeds with no net diff and leaves no stale worktree", async () => {
   const repo = freshRepo();
   // First delivery merges correct code into main.

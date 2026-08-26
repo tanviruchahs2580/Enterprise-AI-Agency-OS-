@@ -2,6 +2,35 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.6.0] — 2026-08-26
+
+### Added — delivery UX & extensibility (all 7 improvement items executed)
+- **DeliverySpec custom test vectors**: ops now accept `cases:[[a,b,expected],…]` — emitted
+  tests use the caller's vectors instead of canonical defaults; repair loop unchanged.
+  Unit+integration covered (`CUSTOM CASES` runs real node --test with 3 vectors).
+- **Structured task creation**: `POST /api/v1/tasks` accepts `deliverySpec` as a JSON
+  object; server validates and serializes it into the worker-readable description
+  (no more hand-built JSON strings). Invalid shapes → typed 400.
+- **Dashboard "Delivery" page** (`/delivery`): live table of autonomous runs — status,
+  hash-chained receipt flag, summary, finished time — auto-refresh every 5s.
+- **Delivery runs list API**: `GET /api/v1/delivery/runs?limit=` (org-scoped, joined
+  task titles + receipt flag).
+- **Client idempotency on dispatch**: `POST /api/v1/delivery/runs` accepts
+  `idempotencyKey`; duplicate keys replay the original execution (202→200 pattern).
+- **Per-run test timeout**: `testsTimeoutMs` threads from route → job → pipeline →
+  each `node --test` attempt (default 120000).
+- **Completion webhook**: when `WEBHOOK_OUTBOUND_URL`/`_SECRET` are configured the
+  worker emits HMAC-signed `delivery.completed` / `delivery.blocked` events via the
+  existing `SignedWebhookEmitter` (3 attempts, exponential backoff).
+- **Delivery metrics**: `agencyos_delivery_runs_total{result="succeeded|blocked"}`
+  on `/metrics`, anchored to audit actions. Build-info bumped to 0.6.0.
+- **Knowledge default view**: empty `?q=` now returns the 25 most recent documents
+  (org-scoped) instead of an empty list.
+
+### Tests
+- Suite grown to **71 tests** (was 66): spec-field validation, dispatch idempotency,
+  runs-list exposure, knowledge default view, custom-vector pipeline run.
+
 ## [0.5.1] — 2026-08-26
 
 ### Fixed — Docker & build hardening (enterprise-grade closure)

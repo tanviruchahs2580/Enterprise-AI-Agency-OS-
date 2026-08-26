@@ -2,6 +2,18 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.6.0 — improvement backlog executed (2026-08-26)
+- [x] DeliverySpec custom test vectors (cases per op) — unit + real node --test integration
+- [x] Structured `deliverySpec` object on POST /tasks with server-side validation
+- [x] Dashboard **Delivery** page (/delivery): live runs table, receipt flags, 5s auto-refresh
+- [x] GET /api/v1/delivery/runs list API (org-scoped, joined titles + receipt flag)
+- [x] Client `idempotencyKey` on delivery dispatch (replay-safe)
+- [x] Per-run `testsTimeoutMs` threading route→job→pipeline→runner
+- [x] HMAC completion webhook (`delivery.completed|blocked`) via SignedWebhookEmitter
+- [x] Metrics: agencyos_delivery_runs_total{result} + build-info 0.6.0
+- [x] Knowledge default view: empty q → 25 most recent docs
+- [x] Suite 71/71 PASS · lint/typecheck/build green
+
 ## v0.5.1 — live-usage QA cycle (2026-08-26, later same day)
 - [x] Live autonomous build: `mathutils` (add/mul/sub) — clean run MERGED; fault-injected run SELF-HEALED
       (converged) — receipts hash-chained, audit chain valid, handoff knowledge persisted

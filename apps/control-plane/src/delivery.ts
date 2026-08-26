@@ -63,6 +63,7 @@ export async function executeDelivery(
     executionId: string;
     injectFault: boolean;
     maxRepairAttempts?: number;
+    testsTimeoutMs?: number;
   }
 ): Promise<DeliveryRunResult> {
   const task = ctx.db.get<{ title: string; description: string; status: string }>(
@@ -99,6 +100,7 @@ export async function executeDelivery(
     codegen: new TemplateCodegen(),
     injectFault: opts.injectFault,
     maxRepairAttempts: opts.maxRepairAttempts ?? 2,
+    testsTimeoutMs: opts.testsTimeoutMs,
     onStage: (stage, detail) => {
       ctx.bus.emit({
         type: `Delivery.${stage}`,
@@ -198,5 +200,29 @@ export async function executeDelivery(
   }
 
   void receipt;
+
+  // Optional completion webhook (HMAC-signed) — fires for succeeded AND blocked.
+  if (ctx.config.WEBHOOK_OUTBOUND_URL && ctx.config.WEBHOOK_OUTBOUND_SECRET) {
+    try {
+      const { SignedWebhookEmitter } = await import("@agency/integrations");
+      const emitter = new SignedWebhookEmitter({
+        url: ctx.config.WEBHOOK_OUTBOUND_URL,
+        secret: ctx.config.WEBHOOK_OUTBOUND_SECRET,
+      });
+      void emitter.emit(out.ok ? "delivery.completed" : "delivery.blocked", {
+        executionId: opts.executionId,
+        taskId: opts.taskId,
+        projectId: opts.projectId,
+        ok: out.ok,
+        summary: out.ok
+          ? out.converged ? "converged" : `delivered ${out.files.length} files`
+          : String(out.blocked ?? ""),
+        commit: out.commitSha ?? null,
+      });
+    } catch (e) {
+      ctx.log.warn("delivery webhook emit failed", { error: String(e) });
+    }
+  }
+
   return { executionId: opts.executionId, traceId: "", ...out } as DeliveryRunResult;
 }

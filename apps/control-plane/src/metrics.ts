@@ -96,6 +96,18 @@ export class MetricsRegistry {
     lines.push("# TYPE agencyos_approvals_pending gauge");
     lines.push(`agencyos_approvals_pending ${Number(apr?.n ?? 0)}`);
 
+    // --- Autonomous delivery (audit-anchored counters) ---
+    const dOk = ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM audit_events WHERE action='delivery.completed'"
+    );
+    const dBlocked = ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM audit_events WHERE action='delivery.blocked'"
+    );
+    lines.push("# HELP agencyos_delivery_runs_total Autonomous delivery runs by outcome.");
+    lines.push("# TYPE agencyos_delivery_runs_total counter");
+    lines.push(`agencyos_delivery_runs_total{result="succeeded"} ${Number(dOk?.n ?? 0)}`);
+    lines.push(`agencyos_delivery_runs_total{result="blocked"} ${Number(dBlocked?.n ?? 0)}`);
+
     // --- Database ---
     let dbOk = 1;
     try {
@@ -109,7 +121,7 @@ export class MetricsRegistry {
 
     lines.push("# HELP agencyos_build_info Build metadata.");
     lines.push("# TYPE agencyos_build_info gauge");
-    lines.push('agencyos_build_info{version="0.4.0"} 1');
+    lines.push('agencyos_build_info{version="0.6.0"} 1');
 
     // --- Process (runtime health; no secrets) ---
     const mem = process.memoryUsage();

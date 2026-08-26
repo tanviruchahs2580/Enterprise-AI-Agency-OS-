@@ -162,7 +162,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.1.0",
+    version: "0.6.0",
     apiVersion: "v1",
     features: featureFlags(ctx),
     docs: "/docs",
@@ -364,11 +364,25 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     auth.requirePermission(me, "task:create");
     const body = (req.body ?? {}) as Record<string, unknown>;
     requireFields(body, ["projectId", "title"]);
+    // Structured delivery spec: pass `deliverySpec` as a JSON object and the
+    // server serializes it into the task description the delivery worker reads.
+    let description = String(body.description ?? "");
+    if (body.deliverySpec !== undefined) {
+      const s = body.deliverySpec as { kind?: string; moduleName?: string; ops?: unknown };
+      if (
+        typeof s !== "object" || s === null ||
+        s.kind !== "delivery" || typeof s.moduleName !== "string" || !Array.isArray(s.ops)
+      ) {
+        throw new AppError("VALIDATION_ERROR",
+          "deliverySpec must be {kind:'delivery', moduleName:string, ops:[{name,arity,cases?}]}");
+      }
+      description = JSON.stringify(s);
+    }
     const t = ctx.tasks.create({
       orgId: me.orgId,
       projectId: String(body.projectId),
       title: String(body.title),
-      description: String(body.description ?? ""),
+      description,
       workstreamId: body.workstreamId ? String(body.workstreamId) : undefined,
       missionId: body.missionId ? String(body.missionId) : undefined,
       priority: body.priority ? Number(body.priority) : 3,
@@ -495,6 +509,19 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       throw new AppError("VALIDATION_ERROR", "task description must be DeliverySpec JSON (kind=delivery)");
     }
 
+    // Client-supplied idempotency: same key returns the original run.
+    const idemKey = body.idempotencyKey ? String(body.idempotencyKey) : null;
+    if (idemKey) {
+      const existing = ctx.db.get<{ response_hash: string }>(
+        "SELECT response_hash FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?",
+        [me.orgId, "delivery.dispatch", idemKey]
+      );
+      if (existing) {
+        reply.code(200);
+        return JSON.parse(String(existing.response_hash)) as Record<string, unknown>;
+      }
+    }
+
     const execId = cryptoRandomId("exe");
     const traceId = cryptoRandomId("trc");
     // Resolve a REAL agent row (FK) — default to backend-engineer.
@@ -524,13 +551,45 @@ export function buildApp(ctx: AppContext): FastifyInstance {
         taskId: String(body.taskId),
         injectFault: Boolean(body.injectFault),
         maxRepairAttempts: body.maxRepairAttempts ? Number(body.maxRepairAttempts) : 2,
+        testsTimeoutMs: body.testsTimeoutMs ? Number(body.testsTimeoutMs) : undefined,
       },
       idempotencyKey: `delivery:${execId}`,
     });
+    if (idemKey) {
+      const dup = ctx.db.get("SELECT id FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?", [
+        me.orgId, "delivery.dispatch", idemKey,
+      ]);
+      if (!dup) {
+        ctx.db.insert("idempotency_keys", {
+          id: cryptoRandomId("idk"), org_id: me.orgId,
+          scope: "delivery.dispatch", key: idemKey,
+          response_hash: JSON.stringify({ executionId: execId, traceId, status: "queued" }),
+          created_at: ctx.db.now(),
+        });
+      }
+    }
     auditEvent(ctx, me, "delivery.dispatched", "execution", execId, "high");
     publishEvent(ctx, me.orgId, me, "DeliveryStarted", { executionId: execId, taskId: body.taskId });
     reply.code(202);
     return { executionId: execId, traceId, status: "queued" };
+  });
+
+  // Recent autonomous delivery runs (dashboard Delivery page).
+  app.get("/api/v1/delivery/runs", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const q = req.query as { limit?: string };
+    const items = ctx.db.all(
+      `SELECT e.id AS executionId, e.task_id AS taskId, e.status, e.trace_id AS traceId,
+              e.output_summary AS summary, e.error_code AS errorCode, e.created_at AS createdAt,
+              e.finished_at AS finishedAt, t.title AS taskTitle, t.quality_receipt IS NOT NULL AND t.quality_receipt <> '' AS receipt
+       FROM executions e JOIN tasks t ON t.id = e.task_id
+       WHERE e.org_id = ?
+         AND EXISTS (SELECT 1 FROM jobs j WHERE j.job_type='deliver_task' AND j.payload LIKE '%' || e.id || '%')
+       ORDER BY e.created_at DESC LIMIT ?`,
+      [me.orgId, Math.min(200, Number(q.limit ?? 50))]
+    );
+    return { items };
   });
 
   app.get("/api/v1/delivery/runs/:id", async (req) => {
@@ -928,7 +987,19 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const me = ident(req);
     auth.requirePermission(me, "knowledge:read");
     const { q } = req.query as { q?: string };
-    if (!q || q.trim() === "") return { items: [] };
+    // Empty query → most recent documents (default dashboard view) instead of
+    // an empty list; non-empty queries keep the LIKE search behavior.
+    if (!q || q.trim() === "") {
+      return {
+        items: ctx.db.all(
+          `SELECT id, kind, title, content, tags, confidence, verification_status, project_id, updated_at
+           FROM knowledge_documents WHERE org_id=?
+           ORDER BY updated_at DESC LIMIT 25`,
+          [me.orgId]
+        ),
+        defaultView: true,
+      };
+    }
     const like = `%${q.replace(/[%_]/g, "")}%`;
     return {
       items: ctx.db.all(

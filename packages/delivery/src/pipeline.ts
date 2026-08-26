@@ -21,6 +21,8 @@ export interface DeliveryPipelineOptions {
   /** Simulate a buggy first attempt to exercise the self-healing loop. */
   injectFault?: boolean;
   maxRepairAttempts?: number;
+  /** Per-attempt test-run timeout in ms (default 120000). */
+  testsTimeoutMs?: number;
   /** Progress/observability callback. */
   onStage?: (stage: string, detail: Record<string, unknown>) => void;
 }
@@ -102,7 +104,7 @@ export async function runDeliveryPipeline(
     // ---- Phase 5–6: test → diagnose → repair loop ----
     const maxRepairs = opts.maxRepairAttempts ?? 2;
     for (let attempt = 1; attempt <= 1 + maxRepairs; attempt++) {
-      const res = await runTests(wt.path);
+      const res = await runTests(wt.path, opts.testsTimeoutMs);
       const passed = res.exitCode === 0 && res.failed === 0;
       attempts.push({
         n: attempt,

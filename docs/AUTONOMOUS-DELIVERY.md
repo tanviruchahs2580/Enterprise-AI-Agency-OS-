@@ -97,6 +97,10 @@ git -C data/repos/... log --oneline -3
 | `DELIVERY_CODEGEN` | `template` (offline) or `llm` | `template` |
 | `MODEL_PROVIDER_API_KEY / BASE_URL` | enables LlmCodegen via ModelRouter | none |
 | `maxRepairAttempts` (per run) | repair budget | 2 |
+| `testsTimeoutMs` (per run body) | timeout for each node --test attempt | 120000 |
+| `idempotencyKey` (per run body) | client key; duplicate dispatches replay the original execution | none |
+| `WEBHOOK_OUTBOUND_URL` + `_SECRET` | when set, worker emits signed `delivery.completed`/`delivery.blocked` | off |
+| DeliverySpec op `cases` | explicit test vectors `[a,b,expected][]` overriding canonical defaults | auto |
 
 Template mode is used for the CI/demo harness and air-gapped deployments and
 produces REAL executable code + REAL tests with a genuine repair loop.

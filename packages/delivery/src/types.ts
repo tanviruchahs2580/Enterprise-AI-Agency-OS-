@@ -19,7 +19,13 @@ export interface DeliverySpec {
   kind: "delivery";
   moduleName: string; // e.g. "calculator"
   namespace?: string;
-  ops: { name: string; arity: 2 }[];
+  ops: {
+    name: string;
+    arity: 2;
+    /** Optional explicit test vectors [a, b, expected]. When omitted the
+     *  engine picks canonical cases per op-name semantics (add/mul/sub). */
+    cases?: [number, number, number][];
+  }[];
 }
 
 export interface GenerationResult {
@@ -72,16 +78,20 @@ export function emitModule(spec: DeliverySpec, opSymbol: Record<string, string>)
   return { path: `src/${spec.moduleName}.js`, content };
 }
 
-export function emitTests(spec: DeliverySpec, cases: Record<string, [number, number, number]>): FileArtifact {
+export function emitTests(spec: DeliverySpec, cases: Record<string, [number, number, number][]>): FileArtifact {
   const blocks = spec.ops
     .map((op) => {
-      const c = cases[op.name];
-      if (!c) return "";
-      return [
-        `test('${op.name}(${c[0]}, ${c[1]}) === ${c[2]}', () => {`,
-        `  assert.strictEqual(${op.name}(${c[0]}, ${c[1]}), ${c[2]});`,
-        `});`,
-      ].join("\n");
+      const list = cases[op.name];
+      if (!list || list.length === 0) return "";
+      return list
+        .map((c) =>
+          [
+            `test('${op.name}(${c[0]}, ${c[1]}) === ${c[2]}', () => {`,
+            `  assert.strictEqual(${op.name}(${c[0]}, ${c[1]}), ${c[2]});`,
+            `});`,
+          ].join("\n")
+        )
+        .join("\n\n");
     })
     .filter(Boolean)
     .join("\n\n");

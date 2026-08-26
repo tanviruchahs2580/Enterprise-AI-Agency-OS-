@@ -20,22 +20,25 @@ export class TemplateCodegen implements CodegenEngine {
   readonly strategy = "template" as const;
 
   async generate(spec: DeliverySpec): Promise<GenerationResult> {
-    const cases: Record<string, [number, number, number]> = {};
+    const cases: Record<string, [number, number, number][]> = {};
     const opSymbol: Record<string, string> = {};
     for (const op of spec.ops) {
-      // canonical semantics per op name
+      // explicit vectors from the spec win; otherwise canonical semantics
+      if (op.cases && op.cases.length > 0) {
+        cases[op.name] = op.cases.map((c) => [c[0], c[1], c[2]] as [number, number, number]);
+      }
       if (op.name.startsWith("add") || op.name.includes("sum")) {
         opSymbol[op.name] = "+";
-        cases[op.name] = [2, 3, 5];
+        cases[op.name] ??= [[2, 3, 5]];
       } else if (op.name.startsWith("mul") || op.name.includes("product")) {
         opSymbol[op.name] = "*";
-        cases[op.name] = [2, 3, 6];
+        cases[op.name] ??= [[2, 3, 6]];
       } else if (op.name.startsWith("sub") || op.name.includes("diff")) {
         opSymbol[op.name] = "-";
-        cases[op.name] = [7, 4, 3];
+        cases[op.name] ??= [[7, 4, 3]];
       } else {
         opSymbol[op.name] = "+";
-        cases[op.name] = [1, 1, 2];
+        cases[op.name] ??= [[1, 1, 2]];
       }
     }
     const files: FileArtifact[] = [
