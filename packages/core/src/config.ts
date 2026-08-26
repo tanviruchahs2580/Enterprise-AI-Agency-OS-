@@ -46,6 +46,7 @@ export const configSchema = z.object({
   ADMIN_BOOTSTRAP_KEY: z.string().optional(),
   /** Sensitive — routed through SecretResolver (Phase 0.5). */
   MODEL_PROVIDER_API_KEY: z.string().optional(),
+  RATE_LIMIT_STORE: z.enum(["memory", "postgres"]).default("memory"),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_API_BASE: z.string().url().default("https://api.github.com"),
   WEBHOOK_OUTBOUND_URL: z.string().url().optional(),

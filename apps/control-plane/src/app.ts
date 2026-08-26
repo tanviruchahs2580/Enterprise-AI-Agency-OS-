@@ -5,13 +5,9 @@ import { AuthService } from "./auth.ts";
 import type { AppContext } from "./context.ts";
 import { assertDeliveryDemoFlags } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
+import { createRateLimitStore, routeClassFor } from "./ratelimit.ts";
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics"]);
-
-interface RateBucket {
-  count: number;
-  windowStart: number;
-}
 
 /** One-time, short-TTL tickets so EventSource never carries the API key. */
 interface SseTicket {
@@ -23,6 +19,14 @@ export function buildApp(ctx: AppContext): FastifyInstance {
   const auth = new AuthService(ctx.db);
   const metrics = new MetricsRegistry();
   const sseTickets = new Map<string, SseTicket>();
+  const rateLimiter = createRateLimitStore(
+    ctx.config.RATE_LIMIT_STORE === "postgres" ? ctx.db : null,
+    {
+      store: ctx.config.RATE_LIMIT_STORE,
+      windowMs: ctx.config.RATE_LIMIT_WINDOW_MS,
+      limits: { default: ctx.config.RATE_LIMIT_MAX, dispatch: 60 },
+    }
+  );
 
   const app = Fastify({
     logger: false,
@@ -73,12 +77,22 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     (req as FastifyRequest & { identity?: Identity }).identity = identity;
 
     // Identity-aware rate buckets: hash(keyId|ip) — collision-resistant,
-    // tenant-safe, and stable across routes (GAP G-07).
-    enforceRateLimit(
-      sha256Hex(`${identity.keyId}|${req.ip}`).slice(0, 24),
-      ctx.config.RATE_LIMIT_WINDOW_MS,
-      ctx.config.RATE_LIMIT_MAX
-    );
+    // tenant-safe, and stable across routes (GAP G-07, Phase C1).
+    const rlBucket = sha256Hex(`${identity.keyId}|${req.ip}`).slice(0, 24);
+    const rlClass = routeClassFor(url);
+    const rlResult = await rateLimiter.check(rlBucket, rlClass, identity.orgId, Date.now());
+    if (!rlResult.allowed) {
+      reply.header("Retry-After", String(Math.ceil((rlResult.retryAfterMs ?? ctx.config.RATE_LIMIT_WINDOW_MS) / 1000)));
+      throw new AppError("RATE_LIMITED", "rate limit exceeded", {
+        details: {
+          windowMs: ctx.config.RATE_LIMIT_WINDOW_MS,
+          max: rlResult.limit,
+          remaining: rlResult.remaining,
+          routeClass: rlClass,
+          retryAfterMs: rlResult.retryAfterMs,
+        },
+      });
+    }
 
     void reply;
   });
@@ -1359,31 +1373,6 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 }
 
 // ---------- shared helpers ----------
-
-function enforceRateLimit(key: string, windowMs: number, max: number): void {
-  const now = Date.now();
-  const b = BUCKETS.get(key);
-  if (!b || now - b.windowStart >= windowMs) {
-    BUCKETS.set(key, { count: 1, windowStart: now });
-    pruneBuckets(now);
-    return;
-  }
-  b.count++;
-  if (b.count > max) {
-    throw new AppError("RATE_LIMITED", "rate limit exceeded", {
-      details: { windowMs, max },
-    });
-  }
-}
-const BUCKETS = new Map<string, RateBucket>();
-let lastPrune = 0;
-function pruneBuckets(now: number): void {
-  if (now - lastPrune < 60_000) return;
-  lastPrune = now;
-  for (const [k, v] of BUCKETS) {
-    if (now - v.windowStart > 10 * 60_000) BUCKETS.delete(k);
-  }
-}
 
 function featureFlags(ctx: AppContext): Record<string, boolean> {
   return {
