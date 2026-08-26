@@ -17,6 +17,10 @@ export interface Identity {
  */
 export class AuthService {
   private db: Db;
+  /** Throttles last_used_at writes: at most one UPDATE per key per window. */
+  private static LAST_USED_WRITE_MS = 60_000;
+  private lastUsedAt = new Map<string, number>();
+
   constructor(db: Db) {
     this.db = db;
   }
@@ -72,10 +76,17 @@ export class AuthService {
     if (!row) throw new AppError("UNAUTHENTICATED", "invalid API key");
     if (row.revoked_at) throw new AppError("UNAUTHENTICATED", "API key revoked");
 
-    this.db.run("UPDATE api_keys SET last_used_at = ? WHERE id = ?", [
-      this.db.now(),
-      row.id,
-    ]);
+    // Write last_used_at at most once per minute per key — hot-path auth stays
+    // read-only on Postgres while ops still get fresh-enough usage signals.
+    const now = Date.now();
+    const last = this.lastUsedAt.get(row.id) ?? 0;
+    if (now - last >= AuthService.LAST_USED_WRITE_MS) {
+      this.db.run("UPDATE api_keys SET last_used_at = ? WHERE id = ?", [
+        new Date(now).toISOString(),
+        row.id,
+      ]);
+      this.lastUsedAt.set(row.id, now);
+    }
     return {
       userId: row.user_id ?? `apikey:${row.name}`,
       orgId: String(row.org_id),

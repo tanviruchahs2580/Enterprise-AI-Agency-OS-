@@ -602,6 +602,15 @@ test("KNOWLEDGE DEFAULT VIEW: empty query returns recent documents", async () =>
   assert.ok(items.length > 0, "default view lists recent docs");
 });
 
+test("SECURITY HEADERS: baseline anti-sniffing/framing headers on every response", async () => {
+  const res = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["x-content-type-options"], "nosniff");
+  assert.equal(res.headers["x-frame-options"], "DENY");
+  assert.equal(res.headers["referrer-policy"], "no-referrer");
+  assert.ok(String(res.headers["permissions-policy"]).includes("camera=()"));
+});
+
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {
   ctx.db.driver.close(); // simulate database loss
   const r = await app.inject({ method: "GET", url: "/ready" });

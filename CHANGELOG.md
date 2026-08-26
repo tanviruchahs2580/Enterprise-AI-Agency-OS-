@@ -4,6 +4,17 @@ All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
 ## [0.6.0] — 2026-08-26
 
+### Fixed — V2.0 artifact-level validation findings
+- **docker/Dockerfile.control-plane (P1)**: `packages/delivery` workspace manifest was never copied into
+  the image and `git` was absent — autonomous delivery could not run from the production container.
+  Both fixed; proven by an end-to-end in-container delivery run on the rebuilt image
+  (worktree → tests → self-heal → merge → receipt, non-root user, artifact verified in /app/data volume).
+- **auth hot path (P2)**: `last_used_at` wrote to Postgres on every request; throttled to one write per
+  key/minute. In-container burst: p95 331→227ms, RPS 84→107 (+28%).
+- **security headers (P2)**: added `x-content-type-options:nosniff`, `x-frame-options:DENY`,
+  `referrer-policy:no-referrer`, `permissions-policy` on every response (+ e2e assertion).
+- meta/metrics version drift corrected to 0.6.0.
+
 ### Added — delivery UX & extensibility (all 7 improvement items executed)
 - **DeliverySpec custom test vectors**: ops now accept `cases:[[a,b,expected],…]` — emitted
   tests use the caller's vectors instead of canonical defaults; repair loop unchanged.

@@ -2,6 +2,14 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.6.0 — V2.0 Zero-Gap validation (2026-08-26)
+- [x] Artifact-level container validation caught P1: delivery workspace + git missing from image → FIXED,
+      proven by in-container autonomous delivery (receipt + audit valid, non-root)
+- [x] Perf: last_used_at write throttle → in-container p95 331→227ms, RPS 84→107
+- [x] Security headers added (+e2e); secrets sweep clean incl. git-history -S; PG+SQLite restore drills MATCH
+- [x] Chaos documented: PID1 SIGKILL kernel-blocked in-container; recovery via controlled restart, mid-chaos run succeeded
+- [x] Score 90/100 → PRODUCTION READY — docs/FINAL-V2-VALIDATION-v0.6.0.md
+
 ## v0.6.0 — improvement backlog executed (2026-08-26)
 - [x] DeliverySpec custom test vectors (cases per op) — unit + real node --test integration
 - [x] Structured `deliverySpec` object on POST /tasks with server-side validation

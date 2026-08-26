@@ -30,6 +30,16 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     bodyLimit: 1_000_000,
   });
 
+  // ---------- security headers (no external dependency) ----------
+  app.addHook("onSend", async (_req, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "no-referrer");
+    reply.header("permissions-policy", "geolocation=(), microphone=(), camera=()");
+    // HSTS is meaningful only when TLS terminates at this process; production
+    // fronts TLS at the proxy, which owns Strict-Transport-Security.
+  });
+
   // ---------- hooks ----------
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url.split("?")[0] ?? req.url;

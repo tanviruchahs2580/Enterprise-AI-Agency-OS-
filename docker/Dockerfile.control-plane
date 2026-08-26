@@ -13,10 +13,20 @@ COPY packages/security/package.json packages/security/
 COPY packages/models/package.json packages/models/
 COPY packages/orchestration/package.json packages/orchestration/
 COPY packages/integrations/package.json packages/integrations/
+COPY packages/delivery/package.json packages/delivery/
 COPY apps/control-plane/package.json apps/control-plane/
 
 # 2) Install production dependencies only (lockfile-pinned, reproducible)
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# 3b) git is REQUIRED by the autonomous delivery loop (worktree isolation,
+#     commit, ff-only merge). Slim images omit it. Version tracks the pinned
+#     bookworm base (digest-pinned via registry); --no-install-recommends keeps
+#     the layer minimal, lists cleaned for image hygiene.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/* \
+  && git --version
 
 # 3) Sources
 COPY packages ./packages
