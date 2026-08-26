@@ -2,6 +2,14 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.9.1 — post-upgrade validation cycle (2026-08-26)
+- [x] DEFECT: worker retry-storm on permanent delivery errors → permanence classification + single dead-letter
+- [x] DEFECT: queue success-path clobbered handler terminal states → conditional update (status='running')
+- [x] DEFECT: governance error_code overwritten by worker → COALESCE preservation
+- [x] DEFECT: container deployments fail-closed (nested docker) → container-aware sandbox gate (+test)
+- [x] Live hardened-stack validation **12/12** (governed delivery→completed, A1 consumed-approval,
+      perfBudget boundary, restart persistence, metrics, audit valid, slow-query silent)
+
 ## v0.9.0 — MASTER UPGRADE PHASE B complete (2026-08-26)
 - [x] B1 genuine governance engine (budget/ownership/status computed; service-complexity auto-approval BLOCK)
 - [x] B2 LLM advisory reviewers behind FEATURE_LLM_REVIEWER (worsen-only, fail-open, cost-tagged)

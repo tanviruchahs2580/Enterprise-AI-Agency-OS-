@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { buildContext, type AppContext } from "../src/context.ts";
 import { buildApp } from "../src/app.ts";
 import { registerWorkers } from "../src/workers.ts";
+import { registerDeliveryWorkers } from "../src/delivery-worker.ts";
 import { AuthService } from "../src/auth.ts";
 import type { FastifyInstance } from "fastify";
 
@@ -49,6 +50,8 @@ before(async () => {
   auth.ensureBootstrapKey(ctx.defaultOrgId(), adminKey);
   ctx.agents.seedRoster(ctx.defaultOrgId());
   registerWorkers(ctx);
+  registerDeliveryWorkers(ctx);
+  await ctx.jobs.start();
   app = buildApp(ctx);
 });
 
@@ -725,6 +728,40 @@ test("A3 CORS ENFORCEMENT: allowed origin passes, evil origin 403+audited, no-or
     "SELECT action FROM audit_events WHERE action='http.origin_blocked' ORDER BY seq DESC LIMIT 1"
   );
   assert.ok(evs.length >= 1);
+});
+
+test("B1 WORKER PERMANENCE: governance-BLOCKED delivery fails ONCE (no retry storm, clean dead-letter)", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "GovBlock " + Date.now() });
+  const t = await api("POST", "/api/v1/tasks", {
+    projectId: prj.body.id, title: "never made ready",
+    deliverySpec: { kind: "delivery", moduleName: "gblocked", ops: [{ name: "add", arity: 2 }] },
+  });
+  // intentionally NOT transitioning to ready → evaluateGovernance must BLOCK
+  const run = await api("POST", "/api/v1/delivery/runs", { taskId: t.body.id });
+  assert.equal(run.status, 202);
+  const execId = String(run.body.executionId);
+
+  let finalStatus = "";
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    const s = await api("GET", `/api/v1/delivery/runs/${execId}`);
+    finalStatus = String((s.body as { execution?: { status?: string } }).execution?.status ?? "");
+    if (finalStatus === "failed") break;
+  }
+  assert.equal(finalStatus, "failed");
+
+  const execRow = ctx.db.get<{ error_code: string; attempt: number }>(
+    "SELECT error_code, attempt FROM executions WHERE id=?", [execId]
+  );
+  assert.equal(execRow?.error_code, "GOVERNANCE_BLOCKED");
+
+  // job must be terminal dead_letter exactly once (no retry/backoff loop)
+  const job = ctx.db.get<{ status: string; attempts: number }>(
+    `SELECT status, attempts FROM jobs WHERE job_type='deliver_task' AND payload LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT 1`,
+    [execId]
+  );
+  assert.equal(job?.status, "dead_letter");
+  assert.ok(Number(job?.attempts) <= 1, `attempts=${job?.attempts} — retry storm detected`);
 });
 
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {

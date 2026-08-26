@@ -2,6 +2,31 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.9.1] — 2026-08-26
+
+### Fixed — post-upgrade validation cycle (live container findings)
+- **Worker retry-storm on permanent delivery errors** (found by new e2e):
+  governance-BLOCKED / agentic-key-missing dispatches re-entered backoff and
+  dead-lettered after 5 noisy attempts. Permanent policy/config errors are now
+  classified and dead-lettered exactly once.
+- **Terminal-state clobber**: queue success-path overwrote handler-set
+  `dead_letter` back to `succeeded`. Success update is now conditional on
+  `status='running'` (handlers own their terminal states).
+- **Governance error_code preservation**: worker no longer overwrites the more
+  specific `GOVERNANCE_BLOCKED` / `APPROVAL_REQUIRED` codes recorded by the
+  governance layer (COALESCE-style conditional update).
+- **Container-aware sandbox gate** (Phase 0.2 refinement): production accepts
+  `SANDBOX_PROVIDER=process` when running inside a hardened container
+  (`/.dockerenv`), keeping the all-in-one compose profile functional; bare-metal
+  production still refuses it. Fixes P1 where in-container deliveries were
+  fail-closed due to nested-docker transport without a container id.
+
+### Validated live (hardened read-only stack, PG16)
+12/12 probes PASS: health/meta · perfBudget boundary rejection · governed
+delivery → task completed + receipt · single-use production approval
+(second deploy blocked "already consumed") · restart persistence · delivery
+metrics counter · audit chain valid · slow-query silent. Suite **112/112**.
+
 ## [0.9.0] — 2026-08-26
 
 ### Added — MASTER UPGRADE PHASE B (governance & agent intelligence, B1–B5)

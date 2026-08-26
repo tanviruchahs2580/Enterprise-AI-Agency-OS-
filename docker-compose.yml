@@ -21,7 +21,9 @@ services:
       PORT: "3000"
       DATABASE_URL: ${DATABASE_URL:-/app/data/agencyos.sqlite}
       ADMIN_BOOTSTRAP_KEY: ${ADMIN_BOOTSTRAP_KEY:?set ADMIN_BOOTSTRAP_KEY}
-      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-docker}
+      # process sandbox inside this hardened container = container-isolated
+      # execution (A4); override to docker only for split-sandbox deployments
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-process}
       MODEL_PROVIDER_API_KEY: ${MODEL_PROVIDER_API_KEY:-}
       MODEL_PROVIDER_BASE_URL: ${MODEL_PROVIDER_BASE_URL:-}
       DEFAULT_DAILY_BUDGET_USD: ${DEFAULT_DAILY_BUDGET_USD:-25}

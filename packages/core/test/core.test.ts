@@ -92,16 +92,17 @@ function prodEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   } as NodeJS.ProcessEnv;
 }
 
-test("PHASE 0.2 production rejects process sandbox provider", () => {
+test("PHASE 0.2 production rejects process sandbox on bare metal; allows inside container", () => {
   assert.throws(
-    () => loadConfig(prodEnv({ SANDBOX_PROVIDER: "process" })),
+    () => loadConfig(prodEnv({ SANDBOX_PROVIDER: "process" }), { isContainer: false }),
     (err: unknown) =>
       err instanceof ConfigValidationError &&
       /SANDBOX_PROVIDER=docker/.test(err.message)
   );
-  // docker accepted
-  const cfg = loadConfig(prodEnv());
-  assert.equal(cfg.SANDBOX_PROVIDER, "docker");
+  const cfg = loadConfig(prodEnv({ SANDBOX_PROVIDER: "process" }), { isContainer: true });
+  assert.equal(cfg.SANDBOX_PROVIDER, "process");
+  const dockerCfg = loadConfig(prodEnv());
+  assert.equal(dockerCfg.SANDBOX_PROVIDER, "docker");
 });
 
 test("PHASE 0.5 secret resolver backends + strict production refusal", () => {

@@ -2,6 +2,16 @@ import type { AppContext } from "./context.ts";
 import { executeDelivery } from "./delivery.ts";
 import { AppError } from "@agency/core";
 
+/** Errors that must never be retried (policy/config semantics, not transient). */
+function isPermanentDeliveryError(e: unknown): boolean {
+  const msg = String((e as Error)?.message ?? e);
+  return (
+    msg.startsWith("governance BLOCK") ||
+    msg.includes("requires MODEL_PROVIDER_API_KEY") ||
+    msg.startsWith("governance:")
+  );
+}
+
 /**
  * Autonomous delivery worker (v0.5.0): executes the closed loop
  * worktree→generate→test→self-heal→review→commit→merge for delivery tasks.
@@ -33,15 +43,19 @@ export function registerDeliveryWorkers(ctx: AppContext): void {
         testsTimeoutMs: data.testsTimeoutMs ? Number(data.testsTimeoutMs) : undefined,
       });
     } catch (e) {
-      if (e instanceof AppError && e.code === "VALIDATION_ERROR") {
-        // permanent — do not retry; fail the execution and dead-letter quietly
-        ctx.db.updateById("executions", executionId, {
-          status: "failed",
-          finished_at: ctx.db.now(),
-          error_code: "INVALID_SPEC",
-        });
+      // Permanent policy/config failures → dead-letter quietly (no retry storm).
+      if (
+        (e instanceof AppError && e.code === "VALIDATION_ERROR") ||
+        isPermanentDeliveryError(e)
+      ) {
+        // Preserve a more specific error_code already recorded by the
+        // governance layer (e.g. GOVERNANCE_BLOCKED / APPROVAL_REQUIRED).
+        ctx.db.run(
+          `UPDATE executions SET status='failed', finished_at=?, error_code=COALESCE(error_code, ?) WHERE id=? AND status NOT IN ('succeeded','failed')`,
+          [ctx.db.now(), e instanceof AppError && e.code === "VALIDATION_ERROR" ? "INVALID_SPEC" : "DELIVERY_BLOCKED", executionId]
+        );
         ctx.db.run("UPDATE jobs SET status='dead_letter', last_error=? WHERE id=?", [
-          e.message,
+          String((e as Error).message ?? e),
           job.id,
         ]);
         return;

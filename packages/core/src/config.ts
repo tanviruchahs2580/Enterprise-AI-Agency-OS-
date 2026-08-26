@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { existsSync } from "node:fs";
 
 export type EnvProfile = "local" | "test" | "staging" | "production";
 
@@ -87,7 +88,10 @@ export class ConfigValidationError extends Error {
  * Parse and validate configuration. Fails fast on invalid production config.
  * In production, requires explicit admin bootstrap key.
  */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  opts?: { isContainer?: boolean }
+): AppConfig {
   const parsed = configSchema.safeParse(env);
   if (!parsed.success) {
     throw new ConfigValidationError(
@@ -95,6 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   const cfg = parsed.data;
+  const isContainer = opts?.isContainer ?? existsSync("/.dockerenv");
 
   if (cfg.NODE_ENV === "production") {
     if (!cfg.ADMIN_BOOTSTRAP_KEY) {
@@ -110,9 +115,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (cfg.CORS_ORIGIN.includes("*")) {
       throw new ConfigValidationError(["wildcard CORS is forbidden in production"]);
     }
-    if (cfg.SANDBOX_PROVIDER === "process") {
+    // Phase 0.2/A4: process sandbox refused on bare-metal production. Inside a
+    // hardened container (read-only rootfs, caps dropped) the container IS the
+    // sandbox — process execution there is acceptable and keeps the all-in-one
+    // compose profile functional without nested docker.
+    if (cfg.SANDBOX_PROVIDER === "process" && !isContainer) {
       throw new ConfigValidationError([
-        "production requires SANDBOX_PROVIDER=docker (process sandbox is dev-only)",
+        "production requires SANDBOX_PROVIDER=docker on bare metal (process sandbox allowed only inside a hardened container)",
       ]);
     }
     if (cfg.STRICT_SECRET_BACKEND && cfg.SECRET_BACKEND === "env") {

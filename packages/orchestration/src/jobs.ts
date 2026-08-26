@@ -136,11 +136,14 @@ export class JobQueue {
     try {
       if (!handler) throw new Error(`no handler registered for ${job.jobType}`);
       await handler(job);
-      this.db.updateById("jobs", job.id, {
-        status: "succeeded",
-        updated_at: this.db.now(),
-        locked_by: null,
-      });
+      // Phase A/F-02 companion fix: a handler may have already moved the job
+      // to a terminal state (e.g. self-dead-lettered permanent policy errors).
+      // Only mark succeeded if the row is still claimed/running.
+      const res = this.db.driver.run(
+        `UPDATE jobs SET status='succeeded', updated_at=?, locked_by=NULL WHERE id=? AND status='running'`,
+        [this.db.now(), job.id]
+      );
+      void res;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const row = this.db.get<{ attempts: number; max_attempts: number }>(
