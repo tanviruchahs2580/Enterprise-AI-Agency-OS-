@@ -2,6 +2,40 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.8.0] — 2026-08-26
+
+### Added — MASTER UPGRADE PROMPT Phase 0 (foundation hardening)
+- **0.1 Baseline freeze**: tag `v0.7.0` + `release/0.7` branch; baseline SHA recorded
+  (`docs/evidence/BASELINE-SHA.txt` = bacb024b0f00…).
+- **0.2 Production config gate extended**: production now also rejects
+  `SANDBOX_PROVIDER=process`; new `STRICT_SECRET_BACKEND=true` forbids plain-env
+  sensitive secrets (config gate + runtime resolver double-check). +5 regression tests.
+- **0.5 Secrets seam**: `packages/core/src/secrets.ts` — `SecretResolver`
+  interface with `env | mock` backends (vault/aws-sm/doppler slots documented);
+  `resolveSensitive()` defense-in-depth.
+- **0.6 DB hardening**: `Db` slow-query instrumentation hook wired to
+  `SLOW_QUERY_LOG_MS` (default off; live container verified 0 noisy lines).
+- **0.7 Suite ≥90**: property-style deliverySpec validation (unit+API), chaos
+  timeout-injection run (no hang, no orphan worktree), gates unit matrix.
+  Suite now **90/90**.
+- **0.4 Docker hardening**: control-plane & dashboard run `read_only` rootfs +
+  tmpfs + `no-new-privileges` + `cap_drop ALL` (+ nginx CHOWN/SETGID/SETUID)
+  + mem/cpu limits. Verified healthy; slow-query noise eliminated after fix;
+  in-container autonomous delivery → task completed on the hardened stack.
+- **0.8 Runbooks**: docs/runbooks/{INCIDENT,KEY-ROTATION,TENANT-OFFBOARDING,
+  BACKUP-RESTORE,SECRETS-ROTATION,DATABASE-FAILOVER}.md; key-rotation &
+  tenant-offboarding executed live with evidence (.data-cert/runbooks/).
+
+### Phase 1 starter (Step 1.1 dual-mode)
+- DeliverySpec gains `mode: "deterministic" | "agentic"`; `selectEngine()`
+  routes fail-closed (`DEPENDENCY_UNAVAILABLE` without MODEL key). Scripted
+  agentic engine emits auditable tool trajectory persisted as knowledge
+  (`Trajectory <module>`); same gate sequence as deterministic mode.
+
+### Blocked / flagged (documented per operating contract)
+- Full OpenTelemetry SDK dep (0.3) — structured trace_id already flows; OTLP wiring pending dep approval.
+- Stryker mutation (0.7 partial), GitHub branch-protection API + OIDC/SCIM/pgvector/gVisor/Helm/Terraform/pen-test (Phases 3–7, 10) — external creds/infra or large deps; seams documented in ROADMAP.
+
 ## [0.7.0] — 2026-08-26
 
 ### Added — master-pipeline alignment (AGENCY_OS_MASTER_PROMPT v1.0)

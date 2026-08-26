@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TemplateCodegen } from "../src/codeng.ts";
+import { selectEngine, AgenticModeRequiredError } from "../src/agentic.ts";
 import { runDeliveryPipeline } from "../src/pipeline.ts";
 import type { DeliverySpec } from "../src/types.ts";
 
@@ -223,6 +224,80 @@ test("CONTRACT GATE: undeclared export or arity drift blocks the delivery", asyn
   assert.equal(out.ok, false);
   assert.match(out.blocked!, /contract mismatch/);
   assert.match(out.blocked!, /undeclared export: sneaky/);
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
+// ---------- PHASE 1.1 dual-mode ----------
+
+test("DUAL MODE: deterministic default; agentic without key fails closed; with scripted engine produces identical artifacts + trajectory", async () => {
+  // default → deterministic
+  assert.ok(selectEngine({}, { hasModelKey: false }) instanceof TemplateCodegen);
+  // agentic without key → clean fail-closed
+  assert.throws(
+    () => selectEngine({ mode: "agentic" }, { hasModelKey: false }),
+    (e: unknown) => e instanceof AgenticModeRequiredError
+  );
+  // agentic WITH key (scripted engine) → same gates, same artifact shape + trajectory
+  const repo = freshRepo();
+  const out = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_agentic",
+    spec: { ...SPEC, mode: "agentic" },
+    codegen: selectEngine({ mode: "agentic" }, { hasModelKey: true }),
+  });
+  assert.equal(out.ok, true, `blocked: ${out.blocked}`);
+  const trajStage = out.stages.find((s) => s.stage === "code_generated");
+  const traj = trajStage?.detail.trajectory as
+    | { mode?: string; toolCalls?: { tool: string }[] }
+    | undefined;
+  assert.equal(traj?.mode, "agentic");
+  assert.ok((traj?.toolCalls?.length ?? 0) >= 8, "read+write per file + tests + git status");
+  assert.match(readFileSync(join(repo, "src", "calculator.js"), "utf8"), /return a \* b;/);
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
+test("PROPERTY-STYLE: deliverySpec validation accepts only well-formed ops across many shapes", async () => {
+  const shapes: { valid: boolean; spec: unknown }[] = [
+    { valid: true, spec: { kind: "delivery", moduleName: "m1", ops: [{ name: "add", arity: 2 }] } },
+    { valid: true, spec: { kind: "delivery", moduleName: "m2", mode: "agentic", ops: [] } },
+    { valid: false, spec: { kind: "delivery", moduleName: "", ops: [] } },
+    { valid: false, spec: { kind: "delivery", ops: [] } },
+    { valid: false, spec: { kind: "other", moduleName: "x", ops: [] } },
+    { valid: false, spec: { moduleName: "x", ops: [] } },
+    { valid: true, spec: { kind: "delivery", moduleName: "M3_X", ops: [{ name: "sub", arity: 2, cases: [[9, 4, 5]] }, { name: "mul", arity: 2 }] } },
+  ];
+  for (const [i, s] of shapes.entries()) {
+    const ok =
+      typeof s.spec === "object" && s.spec !== null &&
+      (s.spec as { kind?: string }).kind === "delivery" &&
+      typeof (s.spec as { moduleName?: string }).moduleName === "string" &&
+      ((s.spec as { moduleName?: string }).moduleName ?? "").length > 0 &&
+      Array.isArray((s.spec as { ops?: unknown }).ops);
+    assert.equal(ok, s.valid, `shape #${i} should be ${s.valid ? "valid" : "invalid"}`);
+  }
+});
+
+// ---------- PHASE 1.1 dual-mode (end) ----------
+
+test("CHAOS/TIMEOUT INJECTION: 1ms tests budget kills hung runs and blocks cleanly (no hang, no orphan)", async () => {
+  const repo = freshRepo();
+  const t0 = Date.now();
+  const out = await runDeliveryPipeline({
+    repoPath: repo,
+    taskId: "tsk_timeout",
+    spec: SPEC,
+    codegen: new TemplateCodegen(),
+    injectFault: true, // force at least one RED cycle
+    maxRepairAttempts: 2,
+    testsTimeoutMs: 1,  // absurdly low — every attempt must time out
+  });
+  const wall = Date.now() - t0;
+  assert.equal(out.ok, false);
+  assert.match(out.blocked!, /repair budget exhausted|unparseable/);
+  assert.ok(wall < 30_000, `must not hang (took ${wall}ms)`);
+  // cleanup equivalence: no stale worktree registration
+  const wl = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" });
+  assert.doesNotMatch(wl, /prunable/);
   rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
 });
 

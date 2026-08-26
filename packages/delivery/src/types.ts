@@ -20,6 +20,8 @@ export interface DeliverySpec {
   moduleName: string; // e.g. "calculator"
   description?: string;
   namespace?: string;
+  /** PHASE 1.1: deterministic (default, offline) | agentic (LLM tool-loop) */
+  mode?: "deterministic" | "agentic";
   ops: {
     name: string;
     arity: 2;
@@ -37,6 +39,11 @@ export interface GenerationResult {
   costUsd: number;
   /** Aggregate content hash of generated files (evidence chain). */
   evidenceHash?: string;
+  /** Agentic mode: auditable tool trajectory (Phase 1.1/1.7). */
+  trajectory?: {
+    mode: "deterministic" | "agentic";
+    toolCalls: { tool: string; target: string; ok: boolean }[];
+  };
 }
 
 export interface FailureInfo {

@@ -27,6 +27,16 @@ services:
       DEFAULT_DAILY_BUDGET_USD: ${DEFAULT_DAILY_BUDGET_USD:-25}
     volumes:
       - agency-data:/app/data
+    # ---- Phase 0.4 hardening ----
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 768m
+    cpus: "1.5"
     # Docker socket is NOT mounted by default — enable only when the docker
     # sandbox provider is used and understand the trust implications:
     # - /var/run/docker.sock:/var/run/docker.sock
@@ -40,6 +50,24 @@ services:
       dockerfile: docker/Dockerfile.dashboard
     depends_on:
       - control-plane
+    # ---- Phase 0.4 hardening ----
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+      - /var/cache/nginx:size=8m
+      - /var/run:size=8m
+      - /var/lib/nginx:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # nginx master needs these to chown/drop to the unprivileged worker user
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    mem_limit: 128m
+    cpus: "0.5"
     ports:
       - "8080:8080"
     restart: unless-stopped

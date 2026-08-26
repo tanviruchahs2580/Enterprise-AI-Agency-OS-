@@ -172,7 +172,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.7.0",
+    version: "0.8.0",
     apiVersion: "v1",
     features: featureFlags(ctx),
     docs: "/docs",

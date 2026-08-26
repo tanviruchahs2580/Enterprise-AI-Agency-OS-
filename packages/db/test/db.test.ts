@@ -77,3 +77,15 @@ test("schema supports full org→project→task flow with FK integrity", () => {
     })
   );
 });
+
+test("PHASE 0.6 slow-query hook fires above threshold, silent below", () => {
+  const slow: { sql: string; ms: number }[] = [];
+  const strict = new Db(driver, { slowMs: 0, onSlow: (sql, ms) => slow.push({ sql, ms }) });
+  strict.get("SELECT 1 AS ok");
+  assert.ok(slow.length >= 1, "threshold 0 reports everything");
+
+  const lenient = new Db(driver, { slowMs: 60_000, onSlow: (sql, ms) => slow.push({ sql, ms }) });
+  const before = slow.length;
+  lenient.all("SELECT 1 AS ok");
+  assert.equal(slow.length, before);
+});

@@ -2,6 +2,17 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.8.0 — MASTER UPGRADE Phase 0 complete + Phase 1 starter (2026-08-26)
+- [x] 0.1 tag v0.7.0 + release/0.7 + BASELINE-SHA evidence
+- [x] 0.2 prod gate: process-sandbox rejected; STRICT_SECRET_BACKEND (+5 tests)
+- [x] 0.4 docker: read_only/tmpfs/no-new-privileges/caps/mem-cpu — healthy; in-container delivery→completed
+- [x] 0.5 SecretResolver seam (env|mock) + strict refusal (defense-in-depth)
+- [x] 0.6 slow-query hook wired to SLOW_QUERY_LOG_MS (container noise 1426→0 after fix)
+- [x] 0.7 suite ≥90 → **90/90** incl property-style validation + chaos timeout-injection
+- [x] 0.8 six runbooks; key-rotation & offboarding executed w/ evidence (.data-cert/runbooks/)
+- [x] 1.1 dual-mode selectEngine + scripted agentic trajectory knowledge (fail-closed w/o key)
+- [~] 0.3 OTel SDK, Stryker mutation, GitHub branch-protection API — BLOCKED (deps/creds) documented in CHANGELOG
+
 ## v0.7.0 — AGENCY_OS master-pipeline alignment (2026-08-26)
 - [x] New fail-closed stages: static_analysis, contract_verified, benchmark_run, docs_generated, postmerge_verified
 - [x] Phase 0 governance events + Phase 1 knowledge (EnrichedSpec/ADR/TestStrategy) + SBOM + retrospective

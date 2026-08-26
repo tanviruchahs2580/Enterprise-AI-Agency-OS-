@@ -5,6 +5,12 @@ import { AppError } from "../src/errors.ts";
 import { EventBus } from "../src/events.ts";
 import { createLogger } from "../src/logger.ts";
 import { loadConfig, ConfigValidationError } from "../src/config.ts";
+import {
+  EnvSecretResolver,
+  MockSecretResolver,
+  createSecretResolver,
+  resolveSensitive,
+} from "../src/secrets.ts";
 
 test("newId returns prefixed uuidv7, time-ordered", () => {
   const a = newId("tsk");
@@ -72,4 +78,83 @@ test("config defaults for local; fails fast in production without admin key", ()
       } as NodeJS.ProcessEnv),
     (err: unknown) => err instanceof ConfigValidationError
   );
+});
+
+// ---------- Phase 0 hardening (master upgrade prompt) ----------
+
+function prodEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "production",
+    DATABASE_URL: "postgres://u:p@db:5432/app",
+    ADMIN_BOOTSTRAP_KEY: "prod-key-32-bytes-aaaaaaaaaaaaaa",
+    SANDBOX_PROVIDER: "docker",
+    ...extra,
+  } as NodeJS.ProcessEnv;
+}
+
+test("PHASE 0.2 production rejects process sandbox provider", () => {
+  assert.throws(
+    () => loadConfig(prodEnv({ SANDBOX_PROVIDER: "process" })),
+    (err: unknown) =>
+      err instanceof ConfigValidationError &&
+      /SANDBOX_PROVIDER=docker/.test(err.message)
+  );
+  // docker accepted
+  const cfg = loadConfig(prodEnv());
+  assert.equal(cfg.SANDBOX_PROVIDER, "docker");
+});
+
+test("PHASE 0.5 secret resolver backends + strict production refusal", () => {
+  const mock = new MockSecretResolver();
+  assert.equal(mock.get("MODEL_PROVIDER_API_KEY"), "mock-MODEL_PROVIDER_API_KEY");
+  assert.equal(new EnvSecretResolver().get("PATH") !== undefined, true);
+
+  const cfgMock = loadConfig({ SECRET_BACKEND: "mock" });
+  assert.equal(createSecretResolver(cfgMock).backend, "mock");
+  assert.equal(resolveSensitive(cfgMock, "GITHUB_TOKEN"), "mock-GITHUB_TOKEN");
+
+  const cfgEnv = loadConfig({});
+  assert.equal(createSecretResolver(cfgEnv).backend, "env");
+  assert.equal(
+    resolveSensitive(cfgEnv, "WEBHOOK_OUTBOUND_SECRET", {}, { WEBHOOK_OUTBOUND_SECRET: "s3cr3t" }),
+    "s3cr3t"
+  );
+});
+
+test("PHASE 0.2 STRICT_SECRET_BACKEND refuses plain-env sensitive keys in production", () => {
+  assert.throws(
+    () =>
+      loadConfig(
+        prodEnv({
+          STRICT_SECRET_BACKEND: "true",
+          MODEL_PROVIDER_API_KEY: "plain-in-env",
+        })
+      ),
+    (err: unknown) =>
+      err instanceof ConfigValidationError && /STRICT_SECRET_BACKEND/.test(err.message)
+  );
+  // runtime resolver double-checks (defense in depth)
+  const strictCfg = {
+    NODE_ENV: "production",
+    SECRET_BACKEND: "env",
+    STRICT_SECRET_BACKEND: true,
+  } as never;
+  assert.throws(() => resolveSensitive(strictCfg, "MODEL_PROVIDER_API_KEY"));
+});
+
+test("PHASE 0.2 production rejects wildcard CORS and sqlite (existing gates still hold)", () => {
+  assert.throws(() => loadConfig(prodEnv({ CORS_ORIGIN: "*" })), ConfigValidationError);
+  assert.throws(
+    () => loadConfig({ ...prodEnv(), DATABASE_URL: "./x.sqlite" } as NodeJS.ProcessEnv),
+    ConfigValidationError
+  );
+});
+
+test("PHASE 0.5 SECRET_BACKEND invalid value rejected; env resolver returns undefined for unknown keys", () => {
+  assert.throws(
+    () => loadConfig({ SECRET_BACKEND: "doppler" } as NodeJS.ProcessEnv),
+    (err: unknown) => err instanceof ConfigValidationError
+  );
+  const r = new EnvSecretResolver({});
+  assert.equal(r.get("DEFINITELY_NOT_SET_KEY_XYZ"), undefined);
 });

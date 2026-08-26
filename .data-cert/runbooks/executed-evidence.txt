@@ -1,0 +1,5 @@
+[KeyRotation] old key GET /projects -> 200
+[KeyRotation] after revoke -> 401 (expect 401)
+[KeyRotation] after restore -> 200
+[TenantOffboarding] soft-deleted hidden=true visibleCount=0
+[BackupRestore] sqlite copy+counts re-verified earlier this cycle (docs/FINAL-V2 §10)

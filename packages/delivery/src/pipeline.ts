@@ -94,6 +94,7 @@ export async function runDeliveryPipeline(
       tokensIn: gen.tokensIn,
       costUsd: gen.costUsd,
       evidenceHash: gen.evidenceHash,
+      trajectory: gen.trajectory,
     });
 
     // ---- static analysis & security gate (fail-closed, pre-test) ----

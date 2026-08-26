@@ -142,13 +142,19 @@ export async function executeDelivery(
   });
 
   const { runDeliveryPipeline } = await import("@agency/delivery");
-  const { TemplateCodegen } = await import("@agency/delivery");
+  const { selectEngine } = await import("@agency/delivery");
+
+  // PHASE 1.1 dual-mode: spec.mode routes engines; agentic requires
+  // MODEL_PROVIDER_API_KEY (fail-closed DEPENDENCY_UNAVAILABLE).
+  const codegen = selectEngine(s as { mode?: "deterministic" | "agentic" }, {
+    hasModelKey: Boolean(ctx.config.MODEL_PROVIDER_API_KEY),
+  });
 
   const out = await runDeliveryPipeline({
     repoPath,
     taskId: opts.taskId,
     spec: spec as never,
-    codegen: new TemplateCodegen(),
+    codegen,
     injectFault: opts.injectFault,
     maxRepairAttempts: opts.maxRepairAttempts ?? 2,
     testsTimeoutMs: opts.testsTimeoutMs,
@@ -233,6 +239,14 @@ export async function executeDelivery(
     });
     // SBOM as first-class searchable/archival artifact
     knw("fact", `SBOM ${s.moduleName} (${String(out.commitSha ?? "converged").slice(0, 8)})`, { components: sbom }, ["sbom"]);
+
+    // PHASE 1.7 trajectory persistence (agentic mode)
+    const traj = out.stages.find((st) => st.stage === "code_generated")?.detail.trajectory as
+      | { mode?: string; toolCalls?: { tool: string; target: string; ok: boolean }[] }
+      | undefined;
+    if (traj?.toolCalls?.length) {
+      knw("fact", `Trajectory ${s.moduleName} (${opts.executionId})`, traj, ["trajectory"]);
+    }
 
     ctx.bus.emit({ type: "Promotion.staging_ready", orgId: opts.orgId, actorType: "system", actorId: "delivery-worker",
       payload: { executionId: opts.executionId, commit: out.commitSha, environment: "staging",

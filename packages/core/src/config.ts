@@ -23,6 +23,14 @@ const Port = (def: number) =>
     .transform((v) => (v === undefined || v === "" ? def : Number.parseInt(v, 10)))
     .refine((n) => Number.isInteger(n) && n >= 0 && n <= 65535, "must be a valid port");
 
+/** Non-negative integer (allows 0 = disabled). */
+const NonNegInt = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? def : Number.parseInt(v, 10)))
+    .refine((n) => Number.isInteger(n) && n >= 0, "must be a non-negative integer");
+
 export const configSchema = z.object({
   NODE_ENV: z.enum(["local", "test", "staging", "production"]).default("local"),
   HOST: z.string().default("127.0.0.1"),
@@ -35,6 +43,8 @@ export const configSchema = z.object({
   RATE_LIMIT_MAX: Int(600),
   SANDBOX_PROVIDER: z.enum(["process", "docker"]).default("process"),
   ADMIN_BOOTSTRAP_KEY: z.string().optional(),
+  /** Sensitive — routed through SecretResolver (Phase 0.5). */
+  MODEL_PROVIDER_API_KEY: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_API_BASE: z.string().url().default("https://api.github.com"),
   WEBHOOK_OUTBOUND_URL: z.string().url().optional(),
@@ -49,6 +59,13 @@ export const configSchema = z.object({
   FEATURE_HERMES: Bool(false),
   FEATURE_VECTOR_KNOWLEDGE: Bool(false),
   FEATURE_GITHUB: Bool(false),
+  // ---- enterprise hardening (Phase 0) ----
+  /** Secret resolution backend: 'env' (default) | 'mock' (tests) | future vault/aws-sm/doppler */
+  SECRET_BACKEND: z.enum(["env", "mock"]).default("env"),
+  /** When true, production refuses sensitive keys resolved from plain process env. */
+  STRICT_SECRET_BACKEND: Bool(false),
+  /** Slow-query logging threshold in ms (0 = off). */
+  SLOW_QUERY_LOG_MS: NonNegInt(0),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
@@ -88,6 +105,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
     if (cfg.CORS_ORIGIN.includes("*")) {
       throw new ConfigValidationError(["wildcard CORS is forbidden in production"]);
+    }
+    if (cfg.SANDBOX_PROVIDER === "process") {
+      throw new ConfigValidationError([
+        "production requires SANDBOX_PROVIDER=docker (process sandbox is dev-only)",
+      ]);
+    }
+    if (cfg.STRICT_SECRET_BACKEND && cfg.SECRET_BACKEND === "env") {
+      const sensitive = ["MODEL_PROVIDER_API_KEY", "WEBHOOK_OUTBOUND_SECRET", "GITHUB_TOKEN"]
+        .filter((k) => env[k]);
+      if (sensitive.length > 0) {
+        throw new ConfigValidationError([
+          `STRICT_SECRET_BACKEND=true forbids plain-env secrets; move ${sensitive.join(", ")} to a secrets backend`,
+        ]);
+      }
     }
   }
 

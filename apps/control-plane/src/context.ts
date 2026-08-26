@@ -40,7 +40,12 @@ export function buildContext(env: NodeJS.ProcessEnv = process.env): AppContext {
   if (applied.length > 0) {
     log.info("migrations applied", { count: applied.length });
   }
-  const db = new Db(driver);
+  const db = new Db(driver, config.SLOW_QUERY_LOG_MS > 0
+    ? {
+        slowMs: config.SLOW_QUERY_LOG_MS,
+        onSlow: (sql, ms) => log.warn("slow query", { ms, sql: sql.slice(0, 120) }),
+      }
+    : undefined);
 
   let orgCache: string | null = null;
   function defaultOrgId(): string {

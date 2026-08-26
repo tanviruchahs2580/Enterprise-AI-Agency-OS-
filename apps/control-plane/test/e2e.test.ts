@@ -611,6 +611,23 @@ test("SECURITY HEADERS: baseline anti-sniffing/framing headers on every response
   assert.ok(String(res.headers["permissions-policy"]).includes("camera=()"));
 });
 
+test("PHASE 0.7 PROPERTY-STYLE API: deliverySpec shapes validated at the boundary", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "PropShapes " + Date.now() });
+  const shapes: { valid: boolean; spec: unknown }[] = [
+    { valid: true, spec: { kind: "delivery", moduleName: "p1", ops: [{ name: "add", arity: 2 }] } },
+    { valid: false, spec: { kind: "delivery" } },
+    { valid: false, spec: { kind: "nonsense", moduleName: "x", ops: [] } },
+    { valid: true, spec: { kind: "delivery", moduleName: "p2", mode: "agentic", ops: [] } },
+    { valid: false, spec: null },
+  ];
+  for (const [i, s] of shapes.entries()) {
+    const res = await api("POST", "/api/v1/tasks", {
+      projectId: prj.body.id, title: `shape-${i}`, deliverySpec: s.spec,
+    });
+    assert.equal(res.status, s.valid ? 201 : 400, `shape #${i}`);
+  }
+});
+
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {
   ctx.db.driver.close(); // simulate database loss
   const r = await app.inject({ method: "GET", url: "/ready" });
