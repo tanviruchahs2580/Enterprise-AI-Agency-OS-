@@ -12,6 +12,7 @@ import { reviewDiff } from "./reviewer.ts";
 import { parseFailure } from "./diagnose.ts";
 import { runTests, writeFiles } from "./runner.ts";
 import { staticScan, contractCheck, runBenchmark } from "./gates.ts";
+import type { ExecTransport } from "./exec-transport.ts";
 
 export interface DeliveryPipelineOptions {
   /** Existing clean git repository (main workspace). */
@@ -24,6 +25,8 @@ export interface DeliveryPipelineOptions {
   maxRepairAttempts?: number;
   /** Per-attempt test-run timeout in ms (default 120000). */
   testsTimeoutMs?: number;
+  /** Phase A/F-04: execution transport for generated code (default process). */
+  transport?: ExecTransport;
   /** Progress/observability callback. */
   onStage?: (stage: string, detail: Record<string, unknown>) => void;
 }
@@ -43,6 +46,7 @@ export type DeliveryStage =
   | "merged"
   | "converged"
   | "postmerge_verified"
+  | "postmerge_reverted"
   | "blocked"
   | "failed";
 
@@ -124,7 +128,7 @@ export async function runDeliveryPipeline(
     // ---- Phase 5–6: test → diagnose → repair loop ----
     const maxRepairs = opts.maxRepairAttempts ?? 2;
     for (let attempt = 1; attempt <= 1 + maxRepairs; attempt++) {
-      const res = await runTests(wt.path, opts.testsTimeoutMs);
+      const res = await runTests(wt.path, opts.testsTimeoutMs, opts.transport);
       const passed = res.exitCode === 0 && res.failed === 0;
       attempts.push({
         n: attempt,
@@ -189,7 +193,7 @@ export async function runDeliveryPipeline(
     }
 
     // ---- performance micro-benchmark (out-of-process) ----
-    const bench = await runBenchmark(wt.path, opts.spec);
+    const bench = await runBenchmark(wt.path, opts.spec, 60000, opts.transport);
     record("benchmark_run", { pass: bench.pass, results: bench.results });
     if (!bench.pass) {
       record("blocked", { reason: "benchmark budget exceeded" });
@@ -227,7 +231,7 @@ export async function runDeliveryPipeline(
       worktreePath = undefined;
       record("converged", { branch: wt.branch, detail: "repaired output matches main; no net diff" });
       // post-merge verification still runs against main (Phase 4.3)
-      const pm = await runTests(opts.repoPath, opts.testsTimeoutMs);
+      const pm = await runTests(opts.repoPath, opts.testsTimeoutMs, opts.transport);
       record("postmerge_verified", { passed: pm.passed, failed: pm.failed, target: "main" });
       if (pm.failed > 0) {
         return { ok: false, blocked: "post-merge verification failed on main", stages, attempts, review, files, mergedBranch: wt.branch, converged: true };
@@ -247,15 +251,30 @@ export async function runDeliveryPipeline(
     record("merged", { branch: wt.branch });
 
     // ---- Phase 4.3: post-merge verification on merged main ----
-    const pmMain = await runTests(opts.repoPath, opts.testsTimeoutMs);
+    const pmMain = await runTests(opts.repoPath, opts.testsTimeoutMs, opts.transport);
     record("postmerge_verified", { passed: pmMain.passed, failed: pmMain.failed, target: "main" });
 
     svc.remove(opts.repoPath, wt);
     worktreePath = undefined;
 
     if (pmMain.failed > 0) {
+      // ---- Phase A/F-05: AUTO-REVERT so main is never left failing ----
+      // ff-only merge ⇒ resetting to the pre-merge base restores exact prior
+      // state deterministically (no conflict possible).
+      try {
+        execGit(opts.repoPath, ["reset", "--hard", wt.baseCommit]);
+        const pmAfter = await runTests(opts.repoPath, opts.testsTimeoutMs, opts.transport);
+        record("postmerge_reverted", {
+          revertedSha: commitSha,
+          restoredTo: wt.baseCommit,
+          mainGreen: pmAfter.failed === 0,
+        });
+      } catch (e) {
+        record("postmerge_reverted", { revertedSha: commitSha, error: String(e).slice(0, 120) });
+      }
       return {
-        ok: false, blocked: `post-merge verification failed (${pmMain.failed} failing)`,
+        ok: false,
+        blocked: "post-merge verification failed (auto-reverted)",
         stages, attempts, review, files: finalDiffFiles, commitSha, mergedBranch: wt.branch,
       };
     }

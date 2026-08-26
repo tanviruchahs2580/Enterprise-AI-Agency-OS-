@@ -2,6 +2,16 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.8.1 — MASTER UPGRADE PHASE A complete (2026-08-26)
+- [x] A1 approval single-use+expiry (0002 migration, consume-on-read, sweeper) — 3 tests
+- [x] A2 atomic idempotency (0003 unique indexes, INSERT-first routes+enqueue, 10-way race e2e)
+- [x] A3 CORS origin enforcement hook + 403 + audit (3 e2e cases)
+- [x] A4 ExecTransport seam (Process|Docker); zero direct node spawns outside transport
+- [x] A5 auto-revert on postmerge failure (`reset --hard base`, stage + blocked outcome) — fixture test
+- [x] A6 users/keys lifecycle APIs (create/list/revoke/rotate; audited; cross-org safe)
+- [x] A7 prod demo-flag guard (+unit matrix)
+- [x] Suite **98/98** · lint/typecheck green · tag `upgrade/phase-a-complete`
+
 ## v0.8.0 — MASTER UPGRADE Phase 0 complete + Phase 1 starter (2026-08-26)
 - [x] 0.1 tag v0.7.0 + release/0.7 + BASELINE-SHA evidence
 - [x] 0.2 prod gate: process-sandbox rejected; STRICT_SECRET_BACKEND (+5 tests)

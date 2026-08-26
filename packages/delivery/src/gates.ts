@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { processTransport, type ExecTransport } from "./exec-transport.ts";
 import type { DeliverySpec, FileArtifact } from "./types.ts";
 
 /**
@@ -65,7 +65,12 @@ export interface BenchResult {
 }
 
 /** Out-of-process micro-benchmark: never trusts generated code inside the agent. */
-export function runBenchmark(worktreePath: string, spec: DeliverySpec, timeoutMs = 60_000): Promise<{ results: BenchResult[]; pass: boolean }> {
+export function runBenchmark(
+  worktreePath: string,
+  spec: DeliverySpec,
+  timeoutMs = 60_000,
+  transport: ExecTransport = processTransport
+): Promise<{ results: BenchResult[]; pass: boolean }> {
   // Absolute file-URL import keeps the eval snippet cwd-independent.
   const moduleUrl = pathToFileURL(join(worktreePath, "src", `${spec.moduleName}.js`)).href;
   const code = `
@@ -84,23 +89,14 @@ for (const name of ops) {
 }
 console.log('BENCH_JSON:' + JSON.stringify(out));
 `;
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
-      cwd: worktreePath,
-      windowsHide: true,
-    });
-    let out = "";
-    const cap = (d: Buffer) => (out += d.toString());
-    child.stdout.on("data", cap);
-    child.stderr.on("data", cap);
+  return transport.exec([process.execPath, "--input-type=module", "-e", code], {
+    cwd: worktreePath,
+    timeoutMs,
+  }).then((res) => {
+    const line = res.stdout.split("\n").find((l) => l.startsWith("BENCH_JSON:"));
     const done = (results: BenchResult[]) =>
-      resolve({ results, pass: results.every((r) => Number.isFinite(r.avgMs) && r.avgMs < 5) });
-    const timer = setTimeout(() => { child.kill("SIGKILL"); done([]); }, timeoutMs);
-    child.on("close", () => {
-      clearTimeout(timer);
-      const line = out.split("\n").find((l) => l.startsWith("BENCH_JSON:"));
-      if (!line) return done([]);
-      try { done(JSON.parse(line.slice("BENCH_JSON:".length))); } catch { done([]); }
-    });
+      ({ results, pass: results.every((r) => Number.isFinite(r.avgMs) && r.avgMs < 5) });
+    if (!line) return done([]);
+    try { return done(JSON.parse(line.slice("BENCH_JSON:".length))); } catch { return done([]); }
   });
 }

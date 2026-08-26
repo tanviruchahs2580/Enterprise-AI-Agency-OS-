@@ -1,1 +1,41 @@
-{  "name": "enterprise-ai-agency-os",  "version": "0.8.0",  "private": true,  "description": "Enterprise-grade, self-hostable AI Software Agency Operating System: control plane, orchestrator, model router, sandboxed agents, governance and observability.",  "license": "Apache-2.0",  "type": "module",  "engines": {    "node": ">=24.0.0"  },  "workspaces": [    "packages/*",    "apps/*"  ],  "scripts": {    "lint": "eslint .",    "typecheck": "tsc -b tsconfig.json && tsc -p apps/dashboard --noEmit",    "test": "node --test \"packages/**/test/*.test.ts\" \"apps/control-plane/test/*.test.ts\"",    "build": "npm run build --workspaces --if-present",    "dev": "node scripts/dev.mjs",    "self-test": "node scripts/self-test.mjs",    "migrate": "node scripts/migrate.mjs",    "seed": "node scripts/seed.mjs"  },  "devDependencies": {    "@types/node": "^24.3.0",    "eslint": "^9.33.0",    "playwright": "^1.62.1",    "typescript": "^5.9.2",    "typescript-eslint": "^8.40.0"  },  "allowScripts": {    "esbuild@0.21.5": true  },  "overrides": {    "brace-expansion@1": ">=1.1.16",    "brace-expansion": ">=5.0.7",    "undici": ">=6.27.0",    "tar": ">=7.5.21"  }}
+{
+  "name": "enterprise-ai-agency-os",
+  "version": "0.8.1",
+  "private": true,
+  "description": "Enterprise-grade, self-hostable AI Software Agency Operating System: control plane, orchestrator, model router, sandboxed agents, governance and observability.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -b tsconfig.json && tsc -p apps/dashboard --noEmit",
+    "test": "node --test \"packages/**/test/*.test.ts\" \"apps/control-plane/test/*.test.ts\"",
+    "build": "npm run build --workspaces --if-present",
+    "dev": "node scripts/dev.mjs",
+    "self-test": "node scripts/self-test.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "seed": "node scripts/seed.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "eslint": "^9.33.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.40.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  },
+  "overrides": {
+    "brace-expansion@1": ">=1.1.16",
+    "brace-expansion": ">=5.0.7",
+    "undici": ">=6.27.0",
+    "tar": ">=7.5.21"
+  }
+}

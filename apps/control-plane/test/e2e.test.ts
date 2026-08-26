@@ -15,7 +15,7 @@ const adminKey = "test-admin-key-0001";
 let dataDir: string;
 
 async function api(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: Record<string, unknown>,
   key: string = adminKey
@@ -626,6 +626,105 @@ test("PHASE 0.7 PROPERTY-STYLE API: deliverySpec shapes validated at the boundar
     });
     assert.equal(res.status, s.valid ? 201 : 400, `shape #${i}`);
   }
+});
+
+test("A2 CONCURRENT IDEMPOTENCY: 10 parallel same-key dispatches → exactly one execution", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Race A2 " + Date.now() });
+  const t = await api("POST", "/api/v1/tasks", {
+    projectId: prj.body.id, title: "race target",
+    deliverySpec: { kind: "delivery", moduleName: "racer", ops: [{ name: "add", arity: 2 }] },
+  });
+  await api("POST", `/api/v1/tasks/${t.body.id}/transition`, { to: "ready" });
+
+  const key = `race-${Date.now()}`;
+  const results = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      api("POST", "/api/v1/delivery/runs", { taskId: t.body.id, idempotencyKey: key })
+    )
+  );
+  const ids = results.map((r) => String((r.body as { executionId?: string }).executionId));
+  assert.ok(new Set(ids).size === 1, "all responses share one executionId");
+  const code202 = results.filter((r) => r.status === 202).length;
+  const code200 = results.filter((r) => r.status === 200).length;
+  assert.equal(code202, 1, "exactly one winner");
+  assert.ok(code200 >= 9, "losers replay stored response");
+
+  const rows = ctx.db.all<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM executions e WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.job_type='deliver_task' AND j.payload LIKE '%' || e.id || '%') AND e.id=?",
+    [ids[0]!]
+  );
+  assert.equal(Number(rows[0]!.n), 1);
+});
+
+test("A6 KEY LIFECYCLE: create→auth→revoke→401; rotate→old401/new200; cross-org delete denied", async () => {
+  // create managed user
+  const u = await api("POST", "/api/v1/users", { name: "Lifecycle User", role: "ENGINEER" });
+  assert.equal(u.status, 201);
+
+  const created = await api("POST", "/api/v1/keys", { name: "lifecycle", role: "ENGINEER" });
+  assert.equal(created.status, 201);
+  const keyId = String(created.body.id);
+  const material = String((created.body as { keyMaterial?: string }).keyMaterial);
+  assert.ok(material.startsWith("aao_"));
+
+  // list never leaks hash/material
+  const list = await api("GET", "/api/v1/keys");
+  const row = (list.body.items as Record<string, unknown>[]).find((k) => k.id === keyId)!;
+  assert.ok(row && !("key_hash" in row) && !("keyMaterial" in row));
+
+  // authenticate works
+  const okRes = await app.inject({ method: "GET", url: "/api/v1/projects", headers: { authorization: `Bearer ${material}` } });
+  assert.equal(okRes.statusCode, 200);
+
+  // revoke → 401
+  await api("DELETE", `/api/v1/keys/${keyId}`);
+  const revokedUse = await app.inject({ method: "GET", url: "/api/v1/projects", headers: { authorization: `Bearer ${material}` } });
+  assert.equal(revokedUse.statusCode, 401);
+
+  // rotate a fresh key
+  const k2 = await api("POST", "/api/v1/keys", { name: "rotatable", role: "QA" });
+  const rot = await api("POST", `/api/v1/keys/${String(k2.body.id)}/rotate`, {});
+  assert.equal(rot.status, 201);
+  const newMat = String((rot.body as { keyMaterial?: string }).keyMaterial);
+  const oldMat = String((k2.body as { keyMaterial?: string }).keyMaterial);
+  const oldUse = await app.inject({ method: "GET", url: "/api/v1/projects", headers: { authorization: `Bearer ${oldMat}` } });
+  const newUse = await app.inject({ method: "GET", url: "/api/v1/projects", headers: { authorization: `Bearer ${newMat}` } });
+  assert.equal(oldUse.statusCode, 401);
+  assert.equal(newUse.statusCode, 200);
+});
+
+test("A7 PROD DEMO FLAGS: fault injection / oversized repairs rejected in production", async () => {
+  const { assertDeliveryDemoFlags } = await import("../src/delivery.ts");
+  assert.doesNotThrow(() => assertDeliveryDemoFlags({ NODE_ENV: "local" }, { injectFault: true }));
+  assert.throws(
+    () => assertDeliveryDemoFlags({ NODE_ENV: "production" }, { injectFault: true }),
+    (e: unknown) => (e as { statusCode?: number }).statusCode === 400
+  );
+  assert.throws(
+    () => assertDeliveryDemoFlags({ NODE_ENV: "production" }, { maxRepairAttempts: 9 }),
+    /limited to 5/
+  );
+});
+
+test("A3 CORS ENFORCEMENT: allowed origin passes, evil origin 403+audited, no-origin unaffected", async () => {
+  const good = await app.inject({ method: "GET", url: "/api/v1/projects",
+    headers: { authorization: `Bearer ${adminKey}`, origin: "http://localhost:5173" } });
+  assert.equal(good.statusCode, 200);
+
+  const evil = await app.inject({ method: "GET", url: "/api/v1/projects",
+    headers: { authorization: `Bearer ${adminKey}`, origin: "https://evil.example" } });
+  assert.equal(evil.statusCode, 403);
+  assert.equal((evil.json() as { error?: { code?: string } }).error?.code, "FORBIDDEN");
+
+  const noOrigin = await app.inject({ method: "GET", url: "/api/v1/projects",
+    headers: { authorization: `Bearer ${adminKey}` } });
+  assert.equal(noOrigin.statusCode, 200);
+
+  // audited
+  const evs = ctx.db.all<{ action: string }>(
+    "SELECT action FROM audit_events WHERE action='http.origin_blocked' ORDER BY seq DESC LIMIT 1"
+  );
+  assert.ok(evs.length >= 1);
 });
 
 test("G-11 DB FAILURE: readiness reports dependency failure safely (must run LAST)", async () => {

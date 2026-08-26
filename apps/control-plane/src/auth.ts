@@ -59,6 +59,36 @@ export class AuthService {
     return { id, keyMaterial: material };
   }
 
+  /** Phase A/F-06: soft revoke — takes effect immediately on next request. */
+  revokeKey(orgId: string, keyId: string): boolean {
+    const res = this.db.driver.run(
+      "UPDATE api_keys SET revoked_at = ? WHERE id = ? AND org_id = ? AND revoked_at IS NULL",
+      [this.db.now(), keyId, orgId]
+    );
+    return Number(res.changes) > 0;
+  }
+
+  /** Phase A/F-06: rotate = revoke old + issue replacement in one step. */
+  rotateKey(orgId: string, keyId: string): { keyMaterial: string; newKeyId: string } | null {
+    const row = this.db.get<{ name: string; role: string }>(
+      "SELECT name, role FROM api_keys WHERE id=? AND org_id=? AND revoked_at IS NULL",
+      [keyId, orgId]
+    );
+    if (!row) return null;
+    const created = this.createKey(orgId, `${row.name}-rotated`, row.role);
+    const ok = this.revokeKey(orgId, keyId);
+    if (!ok) return null; // raced with another revocation
+    return { keyMaterial: created.keyMaterial, newKeyId: created.id };
+  }
+
+  /** Org-scoped listing that NEVER exposes hash or material. */
+  listKeys(orgId: string) {
+    return this.db.all(
+      "SELECT id, name, role, last_used_at, revoked_at, created_at FROM api_keys WHERE org_id=? ORDER BY created_at DESC LIMIT 200",
+      [orgId]
+    );
+  }
+
   authenticate(bearer: string | undefined): Identity {
     if (!bearer) throw new AppError("UNAUTHENTICATED", "missing bearer token");
     const hash = sha256Hex(bearer);

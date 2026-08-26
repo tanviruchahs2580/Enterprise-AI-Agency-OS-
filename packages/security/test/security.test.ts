@@ -108,3 +108,60 @@ test("rejected approval keeps the gate closed", () => {
     (e: unknown) => e instanceof AppError && e.code === "APPROVAL_REQUIRED"
   );
 });
+
+// ---------- PHASE A / F-01: single-use + expiry ----------
+
+test("A1: approved decision is single-use — second gated action denied", () => {
+  const approvals = new ApprovalService(db, audit);
+  const resId = genId("dep");
+  const req = approvals.request({
+    orgId, action: "deploy:production", resourceType: "deployment", resourceId: resId,
+    reason: "one-shot", riskLevel: "critical", requestedBy: "cap",
+    ttlMinutes: 5,
+  });
+  const approver = { userId: genId("usr"), orgId, role: "OWNER", name: "P" };
+  approvals.decide(req.id, approver, true);
+
+  approvals.assertApproved("deploy:production", "deployment", resId, orgId); // consumes
+
+  assert.throws(
+    () => approvals.assertApproved("deploy:production", "deployment", resId, orgId),
+    (e: unknown) => {
+      const err = e as AppError;
+      return err instanceof AppError && err.code === "APPROVAL_REQUIRED" &&
+             /consumed/.test(err.message);
+    }
+  );
+  // consumption audited
+  const ev = db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM audit_events WHERE action='approval.consumed'"
+  );
+  assert.ok(Number(ev?.n) >= 1);
+});
+
+test("A1: expired approval denies with 'expired' reason even while decision=approved", () => {
+  const approvals = new ApprovalService(db, audit);
+  const resId = genId("dep");
+  const req = approvals.request({
+    orgId, action: "secrets.rotate", resourceType: "secret", resourceId: resId,
+    reason: "rotate now", riskLevel: "high", requestedBy: "sec",
+    ttlMinutes: 60,
+  });
+  const approver = { userId: genId("usr"), orgId, role: "OWNER", name: "P" };
+  approvals.decide(req.id, approver, true);
+
+  // backdate expiry after approval (simulates TTL elapsing before use)
+  db.run("UPDATE approvals SET expires_at=? WHERE id=?", [new Date(Date.now() - 1000).toISOString(), req.id]);
+
+  assert.throws(
+    () => approvals.assertApproved("secrets.rotate", "secret", resId, orgId),
+    (e: unknown) => {
+      const err = e as AppError;
+      return err instanceof AppError && err.code === "APPROVAL_REQUIRED" &&
+             /expired/.test(err.message);
+    }
+  );
+});
+// NOTE: sweeper expiry of approved-but-unconsumed rows is covered in
+// apps/control-plane/test/sweeper.test.ts (A1) to keep this package free of
+// app-layer imports.

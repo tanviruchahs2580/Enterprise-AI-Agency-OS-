@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.local/studio/workflows/ideaforge.schema.json",
+  "title": "IdeaForge Style Engine Prompt",
+  "description": "Workflow B structured prompt schema. Version v1.0.0. Companion lesson: modules/module-07-workflow-b-ideaforge.md",
+  "type": "object",
+  "required": ["task", "geometry_source", "facade", "render"],
+  "additionalProperties": false,
+  "properties": {
+    "task": {
+      "type": "string",
+      "enum": ["facade_style_study", "massing_move_study", "interior_mood_study"]
+    },
+    "sprint_id": { "type": "string", "pattern": "^P[0-9]{3}-IDEA-sprint[0-9]{2}$" },
+    "matrix_row": { "type": "string", "pattern": "^R[0-9]$" },
+    "geometry_source": {
+      "type": "object",
+      "required": ["image"],
+      "additionalProperties": false,
+      "properties": {
+        "image": { "type": "string", "description": "path/filename of mass model render" },
+        "lock": {
+          "type": "array",
+          "items": { "type": "string" },
+          "examples": [["massing", "floor_count", "setbacks"]]
+        }
+      }
+    },
+    "facade": {
+      "type": "object",
+      "required": ["system"],
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "type": "string",
+          "description": "catalog id from facade-systems-catalog-starter.md"
+        },
+        "material": { "type": "string" },
+        "pattern": { "type": "string" },
+        "catalog_version": { "type": "string", "default": "v1.0.0" }
+      }
+    },
+    "rhythm_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": { "type": "string" },
+        "strength": { "type": "string", "enum": ["weak", "moderate", "strong"], "default": "moderate" },
+        "rights_note": { "type": "string", "description": "license basis per Red Rule 4" }
+      }
+    },
+    "move": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "design-moves-vocabulary id" },
+        "target": { "type": "string" },
+        "narrative": { "type": "string", "description": "client-facing one-liner produced WITH the output" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "time": { "type": "string", "default": "overcast_noon" },
+        "context": { "type": "string" },
+        "population": { "type": "string", "enum": ["empty", "sparse-life", "active-street"], "default": "empty" }
+      }
+    },
+    "render": {
+      "type": "object",
+      "required": ["style"],
+      "additionalProperties": false,
+      "properties": {
+        "style": { "type": "string", "default": "photoreal_study" },
+        "aspect": { "type": "string", "enum": ["16:9", "4:5", "1:1", "21:9"], "default": "16:9" },
+        "tier": { "type": "string", "enum": ["explore", "craft"], "default": "explore" },
+        "batch": { "type": "integer", "minimum": 1, "maximum": 4, "default": 4 }
+      }
+    },
+    "negative": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["added_floors", "rooftop_structures", "text", "watermark", "warped_lines"]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "written BEFORE generating; graded during MINE phase"
+    }
+  },
+  "examples": [
+    {
+      "task": "facade_style_study",
+      "sprint_id": "P012-IDEA-sprint01",
+      "matrix_row": "R3",
+      "geometry_source": {
+        "image": "P012_mass_north.png",
+        "lock": ["massing", "floor_count", "setbacks"]
+      },
+      "facade": {
+        "system": "perforated_metal_screen",
+        "pattern": "gradient_density",
+        "material": "weathering_steel",
+        "catalog_version": "v1.0.0"
+      },
+      "rhythm_reference": {
+        "image": "ref_kolumba_rhythm.jpg",
+        "strength": "moderate",
+        "rights_note": "own photography, generic rhythm study"
+      },
+      "move": {
+        "name": "erode",
+        "target": "south-west corner",
+        "narrative": "carved loggia notch shades plaza edge and signals entry"
+      },
+      "environment": { "time": "overcast_noon", "context": "urban_core", "population": "empty" },
+      "render": { "style": "photoreal_study", "aspect": "16:9", "tier": "explore", "batch": 4 },
+      "negative": ["added_floors", "rooftop_structures", "text", "watermark"],
+      "acceptance": [
+        "mass silhouette identical to input",
+        "screen porosity varies by orientation",
+        "no balconies invented"
+      ]
+    }
+  ]
+}

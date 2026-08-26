@@ -2,6 +2,31 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.8.1] — 2026-08-26
+
+### Fixed — MASTER UPGRADE PHASE A (P0 security hardening, A1–A7)
+- **A1 Approval single-use + expiry** (F-01): migration 0002 adds `consumed_at` +
+  lookup index; `assertApproved` enforces expiry & consumption atomically
+  (conditional UPDATE), sweeper expires stale approved grants. Tests: expired
+  deny, consumed deny, valid flow, sweeper flip.
+- **A2 Atomic idempotency** (F-02): unique indexes (0003) on idempotency_keys &
+  jobs; dispatch routes and enqueue now INSERT-first with loser-replay.
+  New e2e: 10 parallel same-key dispatches → exactly one execution/job.
+- **A3 CORS enforcement** (F-03): origin allow-list hook → 403 + audited
+  `http.origin_blocked`; no-origin requests unaffected; public paths skipped.
+- **A4 Sandbox transport** (F-04): new `ExecTransport` seam (Process/Docker);
+  all generated-code spawns routed through it — zero direct node spawns left in
+  delivery package; docker fail-closed without `AGENT_EXEC_CONTAINER_ID`.
+- **A5 Auto-revert on postmerge failure** (F-05): `reset --hard base` +
+  re-test + `postmerge_reverted` stage; main can never be left failing.
+- **A6 Key/user lifecycle APIs** (F-06): POST /users, POST/GET/DELETE /keys,
+  POST /keys/:id/rotate — material shown once, revocation immediate, full audit.
+- **A7 Prod demo-flag guard**: injectFault / maxRepairAttempts>5 rejected in
+  production dispatches.
+
+### Tests
+Suite grown to **98/98** (+21 this phase). Tag: `upgrade/phase-a-complete`.
+
 ## [0.8.0] — 2026-08-26
 
 ### Added — MASTER UPGRADE PROMPT Phase 0 (foundation hardening)

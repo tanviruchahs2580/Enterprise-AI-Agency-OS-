@@ -1,6 +1,19 @@
 # SECURITY AUDIT REPORT
 
-Date: 2026-08-24 · Scope: full repository + live API behavior
+## PHASE A RESOLUTIONS (v0.8.1 — MASTER UPGRADE PROMPT, 2026-08-26)
+
+| Finding | Resolution | Commit |
+|---|---|---|
+| F-01 approval reuse/expiry | Single-use consume-on-read (`consumed_at`), expiry enforced in gate, sweeper expires stale grants | `upgrade/phase-a-complete` |
+| F-02 idempotency race | Unique indexes (0003) + INSERT-first atomic put on dispatch routes and job enqueue; 10-way concurrency e2e | same tag |
+| F-03 CORS not enforced | onRequest origin allow-list hook → 403 FORBIDDEN + audit `http.origin_blocked`; e2e ×3 cases | same tag |
+| F-04 unsandboxed generated code | ExecTransport seam: all node spawns routed through Process/Docker transport; prod refuses process sandbox; docker fail-closed without AGENT_EXEC_CONTAINER_ID | same tag |
+| F-05 main left failing post-merge | Auto-revert (`reset --hard base`) + `postmerge_reverted` stage + blocked outcome | same tag |
+| F-06 no key/user lifecycle APIs | POST/GET/DELETE `/keys`, `/keys/:id/rotate`, `POST /users` — audited high/critical, material shown once | same tag |
+
+---
+
+Date of original audit below: 2026-08-24 · Scope: full repository + live API behavior
 
 ## Scan results
 

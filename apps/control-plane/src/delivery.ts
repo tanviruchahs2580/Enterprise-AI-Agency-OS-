@@ -6,6 +6,24 @@ import { AppError, newId, sha256Hex } from "@agency/core";
 import type { AppContext } from "./context.ts";
 
 /**
+ * Phase A/F-07: fault injection and oversized repair budgets are dev-only
+ * tools; production dispatches must not carry them.
+ */
+export function assertDeliveryDemoFlags(
+  env: { NODE_ENV?: string },
+  body: { injectFault?: unknown; maxRepairAttempts?: unknown }
+): void {
+  if (env.NODE_ENV !== "production") return;
+  if (body.injectFault) {
+    throw new AppError("VALIDATION_ERROR", "fault injection disabled in production");
+  }
+  const attempts = body.maxRepairAttempts === undefined ? undefined : Number(body.maxRepairAttempts);
+  if (attempts !== undefined && (!Number.isFinite(attempts) || attempts > 5)) {
+    throw new AppError("VALIDATION_ERROR", "maxRepairAttempts limited to 5 in production");
+  }
+}
+
+/**
  * Autonomous delivery loop wiring (v0.5.0):
  *   POST /api/v1/delivery/runs {taskId, injectFault?}
  *
@@ -142,7 +160,13 @@ export async function executeDelivery(
   });
 
   const { runDeliveryPipeline } = await import("@agency/delivery");
-  const { selectEngine } = await import("@agency/delivery");
+  const { selectEngine, selectTransport } = await import("@agency/delivery");
+
+  // PHASE A/F-04: route generated-code execution through configured sandbox.
+  const transport = selectTransport(
+    (ctx.config as unknown as { SANDBOX_PROVIDER?: string }).SANDBOX_PROVIDER ?? "process",
+    process.env.AGENT_EXEC_CONTAINER_ID
+  );
 
   // PHASE 1.1 dual-mode: spec.mode routes engines; agentic requires
   // MODEL_PROVIDER_API_KEY (fail-closed DEPENDENCY_UNAVAILABLE).
@@ -155,6 +179,7 @@ export async function executeDelivery(
     taskId: opts.taskId,
     spec: spec as never,
     codegen,
+    transport,
     injectFault: opts.injectFault,
     maxRepairAttempts: opts.maxRepairAttempts ?? 2,
     testsTimeoutMs: opts.testsTimeoutMs,

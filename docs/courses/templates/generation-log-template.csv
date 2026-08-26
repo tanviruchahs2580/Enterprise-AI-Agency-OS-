@@ -1,0 +1,4 @@
+gen_id,timestamp,project,scene,view,style,tier,inputs,prompt_snapshot,credits,verdict,patch_type,file_path,notes
+P001_street_v01_g01,2026-08-26T10:14:00,P001_TRAINING,street,eye-level,brick-contextual,explore,P001_base_wide.png;ref_none,30_PROMPTS/P001_street_v01__rf1.0.md,12,KILL,,40_RENDERS/WIP/P001_street_v01_g01.png,naive run - camera invented
+P001_street_v01_g02,2026-08-26T10:22:00,P001_TRAINING,street,eye-level,brick-contextual,explore,P001_base_wide.png;ref_none,30_PROMPTS/P001_street_v01__rf1.0.md,12,KEEP,,40_RENDERS/WIP/P001_street_v01_g02.png,CAMERA structured run - 4/5 criteria met
+P001_street_v01_g03,2026-08-26T10:31:00,P001_TRAINING,street,eye-level,glass-tower-premium,craft,P001_base_wide.png;ref_paving.jpg,30_PROMPTS/P001_street_v02__rf1.0.md,28,PATCH,region,40_RENDERS/WIP/P001_street_v02_g03.png,mullion drift level 4-5 - inpaint zone

@@ -43,35 +43,49 @@ export class JobQueue {
   }
 
   enqueue(p: JobPayload): { id: string } {
+    // Phase A/F-02: INSERT-first atomic idempotency. Losers of the race
+    // re-read the winner's row instead of check-then-insert.
     if (p.idempotencyKey) {
       const existing = this.db.get<{ id: string; status: string; last_error: string | null }>(
         "SELECT id, status, last_error FROM jobs WHERE idempotency_key = ?",
         [p.idempotencyKey]
       );
-      if (existing) {
-        // failed jobs may be re-enqueued under the same key
-        if (existing.status !== "failed" && existing.status !== "dead_letter") {
-          return { id: String(existing.id) };
-        }
+      if (existing && existing.status !== "failed" && existing.status !== "dead_letter") {
+        return { id: String(existing.id) };
       }
     }
     const id = newId("job");
     const now = this.db.now();
-    this.db.insert("jobs", {
-      id,
-      org_id: p.orgId,
-      queue: "default",
-      job_type: p.type,
-      payload: JSON.stringify({ orgId: p.orgId, type: p.type, data: p.data }),
-      status: "pending",
-      run_after: new Date(Date.parse(now) + (p.delayMs ?? 0)).toISOString(),
-      max_attempts: p.maxAttempts ?? 5,
-      attempts: 0,
-      idempotency_key: p.idempotencyKey ?? null,
-      created_at: now,
-      updated_at: now,
-    });
-    return { id };
+    try {
+      this.db.transaction(() => {
+        this.db.insert("jobs", {
+          id,
+          org_id: p.orgId,
+          queue: "default",
+          job_type: p.type,
+          payload: JSON.stringify({ orgId: p.orgId, type: p.type, data: p.data }),
+          status: "pending",
+          run_after: new Date(Date.parse(now) + (p.delayMs ?? 0)).toISOString(),
+          max_attempts: p.maxAttempts ?? 5,
+          attempts: 0,
+          idempotency_key: p.idempotencyKey ?? null,
+          created_at: now,
+          updated_at: now,
+        });
+      });
+      return { id };
+    } catch (e) {
+      // Unique violation on (idempotency_key) → loser re-reads winner.
+      const msg = String((e as Error).message ?? e);
+      if (/UNIQUE constraint failed|duplicate key value|unique/i.test(msg) && p.idempotencyKey) {
+        const winner = this.db.get<{ id: string }>(
+          "SELECT id FROM jobs WHERE idempotency_key = ?",
+          [p.idempotencyKey]
+        );
+        if (winner) return { id: String(winner.id) };
+      }
+      throw e;
+    }
   }
 
   /** Atomically claim due pending jobs. */

@@ -107,20 +107,54 @@ export class ApprovalService {
     return { id: approvalId, status: approve ? "approved" : "rejected" };
   }
 
-  /** Assert there is a live approved decision for the given action+resource. */
+  /**
+   * Assert there is a live, unconsumed approved decision for action+resource.
+   * Single-use (Phase A/F-01): the winning row is consumed atomically on read
+   * so one approval can never authorize two actions. Expired approvals are
+   * rejected even when decision='approved'.
+   */
   assertApproved(action: string, resourceType: string, resourceId: string, orgId: string): void {
-    const row = this.db.get<{ id: string; expires_at: string }>(
-      `SELECT id, expires_at FROM approvals
+    const now = this.db.now();
+    const row = this.db.get<{
+      id: string;
+      expires_at: string;
+      consumed_at: string | null;
+    }>(
+      `SELECT id, expires_at, consumed_at FROM approvals
        WHERE org_id = ? AND action = ? AND resource_type = ? AND resource_id = ?
          AND decision = 'approved'
        ORDER BY created_at DESC LIMIT 1`,
       [orgId, action, resourceType, resourceId]
     );
-    if (!row) {
-      throw new AppError("APPROVAL_REQUIRED", `action '${action}' requires human approval`, {
-        details: { action, resourceType, resourceId },
+    const fail = (reason: "none" | "expired" | "consumed") => {
+      const msg =
+        reason === "expired" ? `approval for '${action}' has expired`
+        : reason === "consumed" ? `approval already consumed`
+        : `action '${action}' requires human approval`;
+      throw new AppError("APPROVAL_REQUIRED", msg, {
+        details: { action, resourceType, resourceId, reason },
       });
-    }
+    };
+    if (!row) return fail("none");
+    if (row.expires_at <= now) return fail("expired");
+    if (row.consumed_at) return fail("consumed");
+
+    // Consume-on-read: conditional UPDATE is the atomic single-use guarantee.
+    const res = this.db.driver.run(
+      "UPDATE approvals SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL",
+      [now, row.id]
+    );
+    if (Number(res.changes) === 0) return fail("consumed");
+    this.audit.append({
+      orgId,
+      actorType: "system",
+      actorId: "approval-gate",
+      action: "approval.consumed",
+      resourceType,
+      resourceId,
+      riskLevel: "medium",
+      metadata: { approvalId: row.id, requestedAction: action },
+    });
   }
 
   listPending(orgId: string): Row[] {

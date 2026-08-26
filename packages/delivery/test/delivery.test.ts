@@ -227,6 +227,39 @@ test("CONTRACT GATE: undeclared export or arity drift blocks the delivery", asyn
   rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
 });
 
+test("A5 AUTO-REVERT: worktree-pass/main-fail module is reverted so main HEAD==base and never left failing", async () => {
+  const repo = freshRepo();
+  const baseHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const envCodegen = new TemplateCodegen();
+  const origGenerate = envCodegen.generate.bind(envCodegen);
+  envCodegen.generate = async (spec) => {
+    const r = await origGenerate(spec);
+    // passes only inside the isolated worktree; fails once merged to main
+    r.files.push({
+      path: "test/envguard.test.js",
+      content:
+        "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n" +
+        "test('runs only in agency worktree', () => {\n" +
+        "  assert.ok(process.cwd().includes('.agency-worktrees'));\n});\n",
+    });
+    return r;
+  };
+
+  const stagesSeen: string[] = [];
+  const out = await runDeliveryPipeline({
+    repoPath: repo, taskId: "tsk_autorevert", spec: SPEC, codegen: envCodegen,
+    onStage: (s) => stagesSeen.push(s),
+  });
+
+  assert.equal(out.ok, false);
+  assert.match(out.blocked!, /auto-reverted/);
+  assert.ok(stagesSeen.includes("postmerge_reverted"), "revert stage recorded");
+  const headAfter = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  assert.equal(headAfter, baseHead, "main restored to pre-merge commit");
+  assert.ok(!existsSync(join(repo, "src")), "merged module removed by revert");
+  rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+});
+
 // ---------- PHASE 1.1 dual-mode ----------
 
 test("DUAL MODE: deterministic default; agentic without key fails closed; with scripted engine produces identical artifacts + trajectory", async () => {

@@ -3,6 +3,7 @@ import { AppError, sha256Hex, newToken } from "@agency/core";
 import type { Identity } from "./auth.ts";
 import { AuthService } from "./auth.ts";
 import type { AppContext } from "./context.ts";
+import { assertDeliveryDemoFlags } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics"]);
@@ -44,6 +45,18 @@ export function buildApp(ctx: AppContext): FastifyInstance {
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url.split("?")[0] ?? req.url;
     if (PUBLIC_PATHS.has(url)) return;
+
+    // ---- Phase A/F-03: CORS origin enforcement (browser requests only) ----
+    const origin = req.headers.origin;
+    if (origin) {
+      const allowed = ctx.config.CORS_ORIGIN.split(",").map((s) => s.trim());
+      if (!allowed.includes(origin)) {
+        auditEvent(ctx, { userId: "anonymous", orgId: ctx.defaultOrgId(), role: "VIEWER", name: "origin-block", keyId: "none" },
+          "http.origin_blocked", "http", url, "low",
+          { origin, allowList: allowed });
+        throw new AppError("FORBIDDEN", "origin not allowed", { details: { origin } });
+      }
+    }
 
     const header = req.headers.authorization;
     let token: string | undefined;
@@ -172,7 +185,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.8.0",
+    version: "0.8.1",
     apiVersion: "v1",
     features: featureFlags(ctx),
     docs: "/docs",
@@ -463,6 +476,70 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return receipt;
   });
 
+  // ---------- Phase A/F-06: users & key lifecycle ----------
+  const ROLES = ["OWNER", "PRINCIPAL", "ADMIN", "CTO", "TECH_LEAD", "ENGINEER", "QA", "SECURITY", "DEVOPS", "VIEWER", "AUDITOR"];
+
+  app.post("/api/v1/users", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:write");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["name", "role"]);
+    if (!ROLES.includes(String(body.role))) {
+      throw new AppError("VALIDATION_ERROR", `role must be one of ${ROLES.join(",")}`);
+    }
+    const id = cryptoRandomId("usr");
+    ctx.db.insert("users", {
+      id, org_id: me.orgId,
+      email: `${id}@provisioned.local`,
+      name: String(body.name), role: String(body.role),
+      created_at: ctx.db.now(), updated_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "user.created", "user", id, "high", { role: body.role, name: body.name });
+    reply.code(201);
+    return { id };
+  });
+
+  app.post("/api/v1/keys", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:write");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["name", "role"]);
+    if (!ROLES.includes(String(body.role))) {
+      throw new AppError("VALIDATION_ERROR", `role must be one of ${ROLES.join(",")}`);
+    }
+    const created = auth.createKey(me.orgId, String(body.name), String(body.role));
+    auditEvent(ctx, me, "key.created", "api_key", created.id, "critical", { name: body.name, role: body.role });
+    reply.code(201);
+    return { id: created.id, keyMaterial: created.keyMaterial }; // material shown ONCE
+  });
+
+  app.get("/api/v1/keys", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:read");
+    return { items: auth.listKeys(me.orgId) };
+  });
+
+  app.delete("/api/v1/keys/:id", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:write");
+    const { id } = req.params as { id: string };
+    const ok = auth.revokeKey(me.orgId, id);
+    if (!ok) throw new AppError("NOT_FOUND", "key not found or already revoked");
+    auditEvent(ctx, me, "key.revoked", "api_key", id, "high");
+    return { ok: true };
+  });
+
+  app.post("/api/v1/keys/:id/rotate", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:write");
+    const { id } = req.params as { id: string };
+    const rotated = auth.rotateKey(me.orgId, id);
+    if (!rotated) throw new AppError("NOT_FOUND", "key not found or already revoked");
+    auditEvent(ctx, me, "key.rotated", "api_key", id, "critical", { newKeyId: rotated.newKeyId });
+    reply.code(201);
+    return { newKeyId: rotated.newKeyId, keyMaterial: rotated.keyMaterial };
+  });
+
   // ---------- agents ----------
   app.get("/api/v1/agents", async (req) => {
     const me = ident(req);
@@ -509,6 +586,9 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     );
     if (!task) throw new AppError("NOT_FOUND", "task not found");
 
+    // Phase A/F-07: demo flags are dev-only
+    assertDeliveryDemoFlags(ctx.config as unknown as { NODE_ENV?: string }, body);
+
     let spec: { kind?: string };
     try {
       spec = JSON.parse(String(task.description));
@@ -519,8 +599,11 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       throw new AppError("VALIDATION_ERROR", "task description must be DeliverySpec JSON (kind=delivery)");
     }
 
-    // Client-supplied idempotency: same key returns the original run.
+    // Client-supplied idempotency: same key returns the original run (A/F-02).
     const idemKey = body.idempotencyKey ? String(body.idempotencyKey) : null;
+    const execId = cryptoRandomId("exe");
+    const traceId = cryptoRandomId("trc");
+    const dispatchResponse = { executionId: execId, traceId, status: "queued" };
     if (idemKey) {
       const existing = ctx.db.get<{ response_hash: string }>(
         "SELECT response_hash FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?",
@@ -530,10 +613,17 @@ export function buildApp(ctx: AppContext): FastifyInstance {
         reply.code(200);
         return JSON.parse(String(existing.response_hash)) as Record<string, unknown>;
       }
+      if (!atomicIdempotencyPut(ctx, {
+        orgId: me.orgId, scope: "delivery.dispatch", key: idemKey, response: dispatchResponse,
+      })) {
+        reply.code(200);
+        const winner = ctx.db.get<{ response_hash: string }>(
+          "SELECT response_hash FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?",
+          [me.orgId, "delivery.dispatch", idemKey]
+        );
+        return JSON.parse(String(winner!.response_hash)) as Record<string, unknown>;
+      }
     }
-
-    const execId = cryptoRandomId("exe");
-    const traceId = cryptoRandomId("trc");
     // Resolve a REAL agent row (FK) — default to backend-engineer.
     let agentFk: string | null = body.agentId ? String(body.agentId) : null;
     if (!agentFk || !ctx.db.get("SELECT id FROM agents WHERE id=?", [agentFk])) {
@@ -565,19 +655,6 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       },
       idempotencyKey: `delivery:${execId}`,
     });
-    if (idemKey) {
-      const dup = ctx.db.get("SELECT id FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?", [
-        me.orgId, "delivery.dispatch", idemKey,
-      ]);
-      if (!dup) {
-        ctx.db.insert("idempotency_keys", {
-          id: cryptoRandomId("idk"), org_id: me.orgId,
-          scope: "delivery.dispatch", key: idemKey,
-          response_hash: JSON.stringify({ executionId: execId, traceId, status: "queued" }),
-          created_at: ctx.db.now(),
-        });
-      }
-    }
     auditEvent(ctx, me, "delivery.dispatched", "execution", execId, "high");
     publishEvent(ctx, me.orgId, me, "DeliveryStarted", { executionId: execId, taskId: body.taskId });
     reply.code(202);
@@ -685,6 +762,17 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
     const execId = cryptoRandomId("exe");
     const traceId = cryptoRandomId("trc");
+    const dispatchResponse = { executionId: execId, traceId, status: "queued" };
+    if (idemKey && !atomicIdempotencyPut(ctx, {
+      orgId: me.orgId, scope: "execution.dispatch", key: idemKey, response: dispatchResponse,
+    })) {
+      reply.code(200);
+      const winner = ctx.db.get<{ response_hash: string }>(
+        "SELECT response_hash FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?",
+        [me.orgId, "execution.dispatch", idemKey]
+      );
+      return JSON.parse(String(winner!.response_hash)) as Record<string, unknown>;
+    }
     ctx.db.insert("executions", {
       id: execId, org_id: me.orgId,
       task_id: String(body.taskId),
@@ -694,19 +782,6 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       trace_id: traceId,
       created_at: ctx.db.now(),
     });
-    if (idemKey) {
-      const dup = ctx.db.get("SELECT id FROM idempotency_keys WHERE org_id=? AND scope=? AND key=?", [
-        me.orgId, "execution.dispatch", idemKey,
-      ]);
-      if (!dup) {
-        ctx.db.insert("idempotency_keys", {
-          id: cryptoRandomId("idk"), org_id: me.orgId,
-          scope: "execution.dispatch", key: idemKey,
-          response_hash: JSON.stringify({ executionId: execId, traceId, status: "queued" }),
-          created_at: ctx.db.now(),
-        });
-      }
-    }
     ctx.jobs.enqueue({
       orgId: me.orgId,
       type: "execute_task",
@@ -1230,6 +1305,32 @@ function publishEvent(
 function ensureProject(ctx: AppContext, orgId: string, projectId: string): void {
   const p = ctx.db.get("SELECT id FROM projects WHERE id=? AND org_id=?", [projectId, orgId]);
   if (!p) throw new AppError("NOT_FOUND", "project not found");
+}
+
+/**
+ * Phase A/F-02: atomic idempotent insert. Inserts the key first; on unique
+ * violation re-reads the winner's stored response and returns null so the
+ * caller replays it. Eliminates the check-then-insert race entirely.
+ */
+function atomicIdempotencyPut(
+  ctx: AppContext,
+  args: { orgId: string; scope: string; key: string; response: Record<string, unknown> }
+): boolean {
+  try {
+    ctx.db.insert("idempotency_keys", {
+      id: cryptoRandomId("idk"),
+      org_id: args.orgId,
+      scope: args.scope,
+      key: args.key,
+      response_hash: JSON.stringify(args.response),
+      created_at: ctx.db.now(),
+    });
+    return true;
+  } catch (e) {
+    const msg = String((e as Error).message ?? e);
+    if (/UNIQUE constraint failed|duplicate key value|unique constraint/i.test(msg)) return false;
+    throw e;
+  }
 }
 
 // late import avoidance: default workflow comes from orchestration package via context wiring

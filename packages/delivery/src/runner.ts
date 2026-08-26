@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { processTransport, type ExecTransport } from "./exec-transport.ts";
 
 /** Env without test-runner inheritance — nested node --test must actually run. */
 export function cleanTestEnv(): NodeJS.ProcessEnv {
@@ -18,48 +18,30 @@ export interface TestRunResult {
 }
 
 /**
- * Runs the generated test suite inside the worktree using node --test.
- * Parses node:test summary for machine-readable counts.
+ * Runs the generated test suite inside the worktree using node --test,
+ * routed through the configured ExecTransport (Phase A/F-04).
  */
-export function runTests(worktreePath: string, timeoutMs = 120_000): Promise<TestRunResult> {
+export async function runTests(
+  worktreePath: string,
+  timeoutMs = 120_000,
+  transport: ExecTransport = processTransport
+): Promise<TestRunResult> {
   const started = Date.now();
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["--test"], {
-      cwd: worktreePath,
-      env: cleanTestEnv(),
-      windowsHide: true,
-    });
-    let out = "";
-    const cap = (d: Buffer) => {
-      out += d.toString();
-      if (out.length > 400_000) out = out.slice(-200_000);
-    };
-    child.stdout.on("data", cap);
-    child.stderr.on("data", cap);
-    child.on("error", (e) => {
-      resolve({
-        command: "node --test",
-        exitCode: -1,
-        durationMs: Date.now() - started,
-        passed: 0,
-        failed: 1,
-        output: String(e),
-      });
-    });
-    child.on("close", (code) => {
-      const passM = /ℹ pass (\d+)/.exec(out) ?? /pass (\d+)/.exec(out);
-      const failM = /ℹ fail (\d+)/.exec(out) ?? /fail (\d+)/.exec(out);
-      resolve({
-        command: "node --test",
-        exitCode: code,
-        durationMs: Date.now() - started,
-        passed: Number(passM?.[1] ?? 0),
-        failed: Number(failM?.[1] ?? (code === 0 ? 0 : 1)),
-        output: out.slice(0, 100_000),
-      });
-    });
-    setTimeout(() => child.kill("SIGKILL"), timeoutMs).unref?.();
+  const res = await transport.exec([process.execPath, "--test"], {
+    cwd: worktreePath,
+    timeoutMs,
   });
+  const out = res.stdout + "\n" + res.stderr;
+  const passM = /ℹ pass (\d+)/.exec(out) ?? /pass (\d+)/.exec(out);
+  const failM = /ℹ fail (\d+)/.exec(out) ?? /fail (\d+)/.exec(out);
+  return {
+    command: "node --test",
+    exitCode: res.exitCode,
+    durationMs: Date.now() - started,
+    passed: Number(passM?.[1] ?? 0),
+    failed: Number(failM?.[1] ?? (res.exitCode === 0 ? 0 : 1)),
+    output: out.slice(0, 100_000),
+  };
 }
 
 /** Writes generated files into the worktree. Returns absolute paths written. */
