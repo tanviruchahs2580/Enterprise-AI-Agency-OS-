@@ -17,6 +17,25 @@ interface DeliveryRun {
 
 const AUTO_MS = 5000;
 
+/** PHASE 10: human-readable labels for delivery pipeline stages. */
+const STAGE_LABELS: Record<string, string> = {
+  worktree_created: "Isolated worktree",
+  code_generated: "Code generated",
+  static_analysis: "Static analysis",
+  fault_injected: "Fault injected (demo)",
+  tests_run: "Tests executed",
+  repair_attempted: "Self-heal repair",
+  contract_verified: "Contract verified",
+  benchmark_run: "Benchmark",
+  docs_generated: "Docs generated",
+  review_completed: "Review gate",
+  committed: "Committed",
+  merged: "Merged to main",
+  converged: "Converged (no net diff)",
+  postmerge_verified: "Post-merge verified",
+  postmerge_reverted: "Auto-reverted",
+};
+
 export default function Delivery() {
   const { data, error, loading, reload } = useApi<{ items: DeliveryRun[] }>(
     "/delivery/runs?limit=100"
@@ -37,7 +56,7 @@ export default function Delivery() {
     <>
       <h1>Autonomous Delivery</h1>
       <p className="subtitle">
-        Requirement → worktree → codegen → tests → self-heal → review → merge.
+        Requirement → worktree → codegen → static analysis → tests → self-heal → contract → benchmark → docs → review → merge → post-merge.
         Auto-refreshes every {AUTO_MS / 1000}s.
       </p>
 
@@ -51,7 +70,8 @@ export default function Delivery() {
         )}
       </div>
 
-      {loading && !items ? (        <Loading />
+      {loading && !items ? (
+        <Loading />
       ) : error ? (
         <ErrorBox message={error} />
       ) : (items ?? []).length === 0 ? (
@@ -84,6 +104,17 @@ export default function Delivery() {
           </table>
         </Panel>
       )}
+
+      {/* PHASE 10: pipeline stage reference — human-readable gate names */}
+      <Panel title="Pipeline Stages">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {Object.entries(STAGE_LABELS).map(([key, label]) => (
+            <span key={key} className="mono muted" style={{ fontSize: 12 }}>
+              {label} <span style={{ opacity: 0.4 }}>({key})</span>
+            </span>
+          ))}
+        </div>
+      </Panel>
     </>
   );
 }

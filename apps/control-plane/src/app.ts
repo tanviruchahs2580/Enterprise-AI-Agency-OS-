@@ -185,7 +185,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.9.1",
+    version: "0.10.0",
     apiVersion: "v1",
     features: featureFlags(ctx),
     docs: "/docs",
@@ -551,6 +551,51 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { newKeyId: rotated.newKeyId, keyMaterial: rotated.keyMaterial };
   });
 
+  // ---------- Phase 41: notifications ----------
+  function pushNotification(ctx2: AppContext, orgId2: string, topic: string, payloadObj: Record<string, unknown>): void {
+    ctx2.db.insert("notifications", {
+      id: cryptoRandomId("ntf"), org_id: orgId2,
+      channel: "inbox", topic,
+      payload: JSON.stringify(payloadObj),
+      created_at: ctx2.db.now(),
+    });
+  }
+
+  app.get("/api/v1/notifications", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const q = req.query as { limit?: string; unread?: string };
+    const limit = Math.min(100, Number(q.limit ?? 50));
+    const where = q.unread === "true" ? "AND read_at IS NULL" : "";
+    return {
+      items: ctx.db.all(
+        `SELECT id, topic, payload, read_at, created_at FROM notifications
+         WHERE org_id = ? ${where} ORDER BY created_at DESC LIMIT ?`,
+        [me.orgId, limit]
+      ),
+      unreadCount: Number((ctx.db.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM notifications WHERE org_id=? AND read_at IS NULL",
+        [me.orgId]
+      ) ?? { n: 0 }).n),
+    };
+  });
+
+  app.post("/api/v1/notifications/:id/read", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const { id } = req.params as { id: string };
+    ctx.db.run("UPDATE notifications SET read_at = ? WHERE id = ? AND org_id = ? AND read_at IS NULL",
+      [ctx.db.now(), id, me.orgId]);
+    return { ok: true };
+  });
+
+  app.post("/api/v1/notifications/read-all", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    ctx.db.run("UPDATE notifications SET read_at = ? WHERE org_id = ? AND read_at IS NULL", [ctx.db.now(), me.orgId]);
+    return { ok: true };
+  });
+
   // ---------- agents ----------
   app.get("/api/v1/agents", async (req) => {
     const me = ident(req);
@@ -668,6 +713,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     });
     auditEvent(ctx, me, "delivery.dispatched", "execution", execId, "high");
     publishEvent(ctx, me.orgId, me, "DeliveryStarted", { executionId: execId, taskId: body.taskId });
+    pushNotification(ctx, me.orgId, "delivery.started", { executionId: execId, taskId: body.taskId });
     reply.code(202);
     return { executionId: execId, traceId, status: "queued" };
   });
@@ -909,6 +955,10 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       ttlMinutes: body.ttlMinutes !== undefined ? Number(body.ttlMinutes) : 60,
     });
     publishEvent(ctx, me.orgId, me, "ApprovalRequested", { approvalId: r.id, action: body.action });
+    pushNotification(ctx, me.orgId, "approval.requested", {
+      approvalId: r.id, action: body.action,
+      riskLevel: body.riskLevel, reason: String(body.reason ?? ""),
+    });
     reply.code(201);
     return r;
   });
@@ -1060,6 +1110,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     publishEvent(ctx, me.orgId, me, "SecurityFindingCreated", {
       findingId: id, severity: body.severity,
     });
+    pushNotification(ctx, me.orgId, "security.finding", { findingId: id, severity: body.severity, title: body.title });
     reply.code(201);
     return { id };
   });
@@ -1114,6 +1165,34 @@ export function buildApp(ctx: AppContext): FastifyInstance {
          ORDER BY updated_at DESC LIMIT 25`,
         [me.orgId, like, like, like]
       ),
+    };
+  });
+
+  // ---------- Phase 40: global search ----------
+  app.get("/api/v1/search", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const { q } = req.query as { q?: string };
+    if (!q || q.trim() === "") return { items: [] };
+    const like = `%${q.replace(/[%_]/g, "")}%`;
+    const projects = ctx.db.all<{ id: string; name: string; type: string }>(
+      "SELECT id, name, 'project' AS type FROM projects WHERE org_id=? AND (name LIKE ? OR slug LIKE ?) LIMIT 5",
+      [me.orgId, like, like]
+    );
+    const tasks = ctx.db.all<{ id: string; title: string; type: string }>(
+      "SELECT id, title, 'task' AS type FROM tasks WHERE org_id=? AND title LIKE ? LIMIT 5",
+      [me.orgId, like]
+    );
+    const knowledge = ctx.db.all<{ id: string; title: string; type: string }>(
+      "SELECT id, title, 'knowledge' AS type FROM knowledge_documents WHERE org_id=? AND (title LIKE ? OR content LIKE ?) LIMIT 5",
+      [me.orgId, like, like]
+    );
+    return {
+      items: [
+        ...projects.map((r) => ({ ...r, url: `/projects` })),
+        ...tasks.map((r) => ({ ...r, url: `/tasks` })),
+        ...knowledge.map((r) => ({ ...r, url: `/knowledge` })),
+      ],
     };
   });
 
@@ -1178,6 +1257,51 @@ export function buildApp(ctx: AppContext): FastifyInstance {
   });
 
   // ---------- SSE event stream ----------
+  const EVENT_LABELS: Record<string, string> = {
+    ProjectCreated: "Project created",
+    TaskCreated: "Task created",
+    TaskReady: "Task marked ready",
+    TaskPlanned: "Task planned",
+    TaskInProgress: "Implementation started",
+    TaskReview: "Code review started",
+    TaskQa: "QA validation",
+    TaskSecurity: "Security review",
+    TaskApproval: "Awaiting approval",
+    TaskDeploying: "Deploying",
+    TaskDeployed: "Deployed",
+    TaskCompleted: "Task completed",
+    DeliveryStarted: "Delivery dispatch queued",
+    "Delivery.worktree_created": "Isolated worktree provisioned",
+    "Delivery.code_generated": "Code generated",
+    "Delivery.static_analysis": "Static analysis gate",
+    "Delivery.fault_injected": "Fault injected (demo)",
+    "Delivery.tests_run": "Tests executed",
+    "Delivery.repair_attempted": "Self-heal repair applied",
+    "Delivery.contract_verified": "Contract verified",
+    "Delivery.benchmark_run": "Performance benchmark",
+    "Delivery.docs_generated": "Documentation generated",
+    "Delivery.review_completed": "Review gate decision",
+    "Delivery.committed": "Committed to branch",
+    "Delivery.merged": "Merged to main",
+    "Delivery.converged": "Self-heal converged (no net diff)",
+    "Delivery.postmerge_verified": "Post-merge verification passed",
+    "Delivery.postmerge_reverted": "Post-merge failure auto-reverted",
+    "Delivery.blocked": "Delivery blocked by gate",
+    GovernanceClassified: "Request classified",
+    "Governance.gate": "Governance gate evaluated",
+    "Governance.impact": "Impact analysis complete",
+    KnowledgeCreated: "Knowledge document created",
+    "Promotion.staging_ready": "Staging promotion ready",
+    DeploymentSucceeded: "Deployment succeeded",
+    ApprovalRequested: "Human approval requested",
+    ApprovalGranted: "Approval granted",
+    SecurityFindingCreated: "Security finding recorded",
+    AgentStarted: "Agent execution started",
+  };
+  function labelFor(type: string): string {
+    return EVENT_LABELS[type] ?? type.replace(/[._]/g, " ");
+  }
+
   app.get("/api/v1/events", async (req, reply) => {
     const me = ident(req);
     auth.requirePermission(me, "project:read");
@@ -1188,29 +1312,44 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       "x-accel-buffering": "no",
     });
     reply.raw.write(`event: hello\ndata: {"org":"ok"}\n\n`);
+
+    // Phase 10: Last-Event-ID replay — client reconnects with last seen seq,
+    // server replays persisted domain_events after that point.
+    const url = new URL(req.url, "http://localhost");
+    const lastEventId = req.headers["last-event-id"] ?? url.searchParams.get("lastEventId");
+    if (lastEventId && /^\d+$/.test(String(lastEventId))) {
+      const missed = ctx.db.all(
+        `SELECT seq, type, payload, occurred_at FROM domain_events
+         WHERE org_id = ? AND seq > ? ORDER BY seq ASC LIMIT 200`,
+        [me.orgId, Number(lastEventId)]
+      );
+      for (const e of missed) {
+        reply.raw.write(`id: ${e.seq}\nevent: domain\ndata: ${JSON.stringify({
+          seq: e.seq, type: e.type, label: labelFor(String(e.type)),
+          payload: JSON.parse(String(e.payload || "{}")), occurredAt: e.occurred_at,
+        })}\n\n`);
+      }
+    }
+
+    // Snapshot: recent events for initial page load
     for (const e of ctx.bus.recent(20)) {
       if (e.orgId && e.orgId !== me.orgId) continue;
       reply.raw.write(`event: domain\ndata: ${JSON.stringify(e)}\n\n`);
     }
+
+    let liveSeq = Number(lastEventId ?? 0) || 0;
     const unsub = ctx.bus.subscribe((e) => {
       if (e.orgId && e.orgId !== me.orgId) return;
       try {
-        reply.raw.write(`event: domain\ndata: ${JSON.stringify(e)}\n\n`);
-      } catch {
-        /* stream closed */
-      }
+        // look up the persisted seq for this event for id assignment
+        liveSeq++;
+        reply.raw.write(`id: ${liveSeq}\nevent: domain\ndata: ${JSON.stringify({ ...e, label: labelFor(e.type) })}\n\n`);
+      } catch { /* stream closed */ }
     });
     const hb = setInterval(() => {
-      try {
-        reply.raw.write(`: keepalive\n\n`);
-      } catch {
-        /* ignore */
-      }
+      try { reply.raw.write(`: keepalive\n\n`); } catch { /* ignore */ }
     }, 15_000);
-    req.raw.on("close", () => {
-      clearInterval(hb);
-      unsub();
-    });
+    req.raw.on("close", () => { clearInterval(hb); unsub(); });
     await new Promise(() => { /* hold open until client disconnects */ });
   });
 

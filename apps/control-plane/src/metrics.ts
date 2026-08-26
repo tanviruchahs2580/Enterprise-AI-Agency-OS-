@@ -121,7 +121,7 @@ export class MetricsRegistry {
 
     lines.push("# HELP agencyos_build_info Build metadata.");
     lines.push("# TYPE agencyos_build_info gauge");
-    lines.push('agencyos_build_info{version="0.9.1"} 1');
+    lines.push('agencyos_build_info{version="0.10.0"} 1');
 
     // --- Process (runtime health; no secrets) ---
     const mem = process.memoryUsage();
