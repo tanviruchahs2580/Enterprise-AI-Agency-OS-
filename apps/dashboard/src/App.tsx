@@ -45,18 +45,24 @@ export default function App() {
   );
 
   useEffect(() => setMobileNav(false), [location.pathname]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (!key) return <Login onAuth={(k) => { setApiKey(k); setKey(k); }} />;
 
   return (
     <div className="flex min-h-screen bg-bg text-text">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-white">Skip to content</a>
       {/* Sidebar */}
       <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-bg-panel">
         <div className="px-5 py-4 border-b border-border">
           <div className="font-bold text-[15px] tracking-tight">Agency OS</div>
           <div className="text-[11px] text-text-dim">Enterprise Control Plane</div>
         </div>
-        <nav className="flex-1 overflow-y-auto py-2">
+        <nav className="flex-1 overflow-y-auto py-2" aria-label="Primary navigation">
           {NAV.map((n) => (
             <NavLink
               key={n.to}
@@ -124,7 +130,7 @@ export default function App() {
           <div className="h-8 w-8 rounded-full bg-accent/20 text-accent flex items-center justify-center text-sm font-semibold">A</div>
         </header>
 
-        <main className="flex-1 overflow-x-hidden px-5 py-5 lg:px-7 max-w-[1400px] w-full">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden px-5 py-5 lg:px-7 max-w-[1400px] w-full">
           <Outlet />
         </main>
       </div>

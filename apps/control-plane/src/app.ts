@@ -983,6 +983,24 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { items: ctx.approvals.listPending(me.orgId) };
   });
 
+  app.get("/api/v1/approvals", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "settings:read");
+    const q = req.query as { status?: string; projectId?: string };
+    const clauses = ["org_id = ?"];
+    const params: unknown[] = [me.orgId];
+    if (q.status) { clauses.push("decision = ?"); params.push(q.status); }
+    if (q.projectId) { clauses.push("project_id = ?"); params.push(q.projectId); }
+    const items = ctx.db.all(
+      `SELECT id, project_id AS projectId, action, resource_type AS resourceType, resource_id AS resourceId,
+              reason, risk_level AS riskLevel, requested_by AS requestedBy, decision, decided_at AS decidedAt,
+              created_at AS createdAt, expires_at AS expiresAt
+       FROM approvals WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT 100`,
+      params
+    );
+    return { items };
+  });
+
   app.post("/api/v1/approvals/:id/decide", async (req) => {
     const me = ident(req);
     auth.requirePermission(me, "approval:decide");

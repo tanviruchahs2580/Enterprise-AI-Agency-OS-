@@ -1,0 +1,41 @@
+# skill-governance.yaml — Agency skill registry policy
+# Local-first: skills.lock is authoritative; `npx skills find` only refreshes candidates.
+
+governance:
+  require_sast: true
+  require_pii_scan: true
+  cache_first: true              # read skills.lock before any `npx skills find`
+  human_approval_below_installs: 1000
+  min_stars: 100
+  min_installs: 1000
+
+trusted_owners:
+  - vercel-labs
+  - anthropics
+  - microsoft
+  - addyosmani
+  - sickn33
+  # owners below are allowed but EVERY skill needs SAST + stars>=min before auto-install
+  - bobmatnyc
+  - giuseppe-trisciuoglio
+
+quarantine_owners: []            # unknown owners -> manual review, never auto-install
+
+harness:
+  adapter: opencode
+  delegation: Task-subagent      # T1-T6 map to AGENTS.md agent roster
+  approval_service: permission-layer  # destructive/high-risk routed here
+
+budget:
+  enabled: true
+  finops_agent: finops-agent
+  breach_action: escalate-same-day
+
+privacy:
+  pii_scan: true
+  no_exfiltration: true
+  secret_store: sessionStorage   # D1-fixed; prod target httpOnly cookie
+
+monitor:
+  script: scripts/workflow-monitor.mjs
+  gates: [eslint, tsc, vite-build, vitest, secret-scan, pii-scan, budget]

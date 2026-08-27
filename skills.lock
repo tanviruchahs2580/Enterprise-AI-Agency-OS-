@@ -1,0 +1,58 @@
+# skills.lock — pinned, verified skills (local-first source of truth)
+# Format: owner/repo@skill | version pinned at approval | installs | status
+# Refresh candidates via: npx skills find "<query>" --owner <trusted>
+# Always pin exact version on install: npx skills add <owner/repo@skill@version> -g -y
+
+entries:
+  - id: vercel-labs/agent-skills@vercel-react-best-practices
+    tier: T2
+    version: "pin-on-approve"      # resolve exact version at install from skills.sh
+    installs: 667900
+    trusted_owner: true
+    sast: pending-approval
+    status: approved
+    used_for: "Frontend performance, React/Next patterns, Server Components"
+
+  - id: addyosmani/web-quality-skills@accessibility
+    tier: T2
+    version: "pin-on-approve"
+    installs: 47800
+    trusted_owner: true
+    sast: pending-approval
+    status: approved
+    used_for: "WCAG 2.1 AA, focus, contrast, aria"
+
+  - id: sickn33/agentic-awesome-skills@api-security-best-practices
+    tier: T3
+    version: "pin-on-approve"
+    installs: 8400
+    trusted_owner: true
+    sast: pending-approval
+    status: approved
+    used_for: "API authn/authz, OWASP, secrets handling"
+
+  - id: bobmatnyc/claude-mpm-skills@playwright-e2e-testing
+    tier: T4
+    version: "pin-on-approve"
+    installs: 2800
+    trusted_owner: true
+    sast: pending-approval
+    status: approved-with-sast      # <10K installs -> SAST required before prod use
+    used_for: "End-to-end UI tests"
+
+  - id: giuseppe-trisciuoglio/developer-kit@docs-updater
+    tier: T6
+    version: "pin-on-approve"
+    installs: 2200
+    trusted_owner: true
+    sast: pending-approval
+    status: approved-with-sast
+    used_for: "README/CHANGELOG automation"
+
+quarantined:
+  - id: mrgoonie/claudekit-skills@devops
+    installs: 962
+    reason: "Below min_installs (1000) -> human approval required before install"
+
+last_refresh: "2026-08-27"
+refreshed_by: npx skills find (read-only)

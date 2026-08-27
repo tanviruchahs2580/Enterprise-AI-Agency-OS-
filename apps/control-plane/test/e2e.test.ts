@@ -349,6 +349,35 @@ test("APPROVAL TIMEOUT: expired request cannot be decided and gate stays closed"
   assert.equal(depErr.code, "APPROVAL_REQUIRED");
 });
 
+test("GET /approvals filters by decision and projectId (history tab backing)", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Approval Filter Fixture" });
+  assert.equal(prj.status, 201);
+  const projectId = String(prj.body.id);
+
+  const apr = await api("POST", "/api/v1/approvals", {
+    action: "deploy:staging",
+    resourceType: "deployment",
+    resourceId: crypto.randomUUID(),
+    reason: "history filter test",
+    riskLevel: "medium",
+    ttlMinutes: 60,
+    projectId,
+  });
+  assert.equal(apr.status, 201);
+  const decided = await api("POST", `/api/v1/approvals/${apr.body.id}/decide`, { decision: "approve" });
+  assert.equal(decided.status, 200);
+
+  const approved = await api("GET", "/api/v1/approvals?status=approved");
+  assert.equal(approved.status, 200);
+  const ids = (approved.body.items as { id: string }[]).map((a) => a.id);
+  assert.ok(ids.includes(apr.body.id), "decided approval should appear under status=approved");
+
+  const byProject = await api("GET", `/api/v1/approvals?projectId=${projectId}`);
+  assert.equal(byProject.status, 200);
+  const pids = (byProject.body.items as { id: string }[]).map((a) => a.id);
+  assert.ok(pids.includes(apr.body.id), "approval should be filterable by projectId");
+});
+
 test("MISSIONS & WORKSTREAMS lifecycle endpoints", async () => {
   const prj = await api("POST", "/api/v1/projects", { name: "Mission Control" });
   const projectId = String(prj.body.id);

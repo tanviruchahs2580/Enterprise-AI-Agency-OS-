@@ -139,11 +139,32 @@ foundation + design system + page rebuilds**, plus closing a small set of real f
 
 ## 4. What was executed this session
 
+### Session 1 — review + foundation (committed: v0.11.0)
 - ✅ **P1 fixed & verified:** `api.ts` now always sends `content-type: application/json` and an empty
-  `{}` body for POSTs, so the SSE ticket exchange returns `201` and the stream emits correctly
-  (verified: `STATUS=200`, `text/event-stream`, `event: hello` received).
-- ✅ Documented the full gap analysis + ordered step plan above.
-- ⏳ Foundation execution (Phase A) is the next concrete build step.
+  `{}` body for POSTs, so the SSE ticket exchange works (verified `text/event-stream`, `event: hello`).
+- ✅ **D1 fixed:** API key moved from `localStorage` → `sessionStorage` + in-memory cache.
+- ✅ **Foundation (Phase A):** Tailwind design system, component lib (`ui.tsx`), Toast, ErrorBoundary,
+  `useEventStream` (SSE + `useApiQuery`), app shell rebuild, all 12 pages rebuilt.
+
+### Session 2 — governed agency workflow + enterprise-grade delivery (committed after this section)
+- ✅ **Agency workflow governed (master-prompt v1 → upgraded v2):** gap analysis
+  (`docs/agency/workflow-review.md`), `skill-governance.yaml`, `skills.lock` (real, verified skills
+  via `npx skills find`), and `docs/agency/agency-workflow.md` (closes G1–G10: offline fallback,
+  harness adapter, DoD, FinOps, a11y/i18n, PII, workflow self-review M12, monitor/observability).
+- ✅ **Workflow-monitor software built & reviewed:** `scripts/workflow-monitor.mjs` enforces the
+  11-step checklist + repo quality gates (eslint, typecheck, build, vitest, secret/PII scan,
+  scope guardrails, skills.lock). Self-review caught two real bugs (YAML parse, Windows `npx` spawn)
+  and now reports **12/13 gates green** (1 advisory: Playwright browsers unavailable in sandbox).
+- ✅ **Executed the pipeline on the repo (S7–S11):**
+  - **C1 — Project detail view** (`pages/ProjectDetail.tsx` + route): tabs Overview/Tasks/Delivery/
+    Approvals/Knowledge, joined to real per-project data.
+  - **P5 — Approvals history:** new backend `GET /api/v1/approvals` (filter by `status` + `projectId`)
+    + History tab in the Approvals page. Backed by a new backend test (119/119 pass).
+  - **G5 — a11y/responsive polish:** skip-link, `aria-label` nav, Escape-dismiss mobile drawer.
+  - **T4 — Playwright e2e scaffold:** `playwright.config.ts` + `e2e/smoke.spec.ts` (run with browsers
+    in a networked env; build-smoke used as fallback here).
+- ✅ All hard gates green: `eslint` clean, `tsc -b` + dashboard typecheck clean, `vite build` success,
+  backend `vitest` **119/119**, secret/PII scan clean, no unguarded destructive ops.
 
 ---
 
