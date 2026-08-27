@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useApiQuery } from "../components/useEventStream.ts";
 import { Card, Badge, Skeleton, EmptyState } from "../components/ui.tsx";
 
@@ -12,6 +13,7 @@ const STAGES = [
 
 export default function Delivery() {
   const { data, isLoading, isError, error, refetch } = useApiQuery<{ items: DeliveryRun[] }>("delivery", "/delivery/runs?limit=100");
+  const navigate = useNavigate();
   const [tick, setTick] = useState(0);
   useEffect(() => { const id = setInterval(()=>setTick((t)=>t+1), 5000); return ()=>clearInterval(id); }, []);
   useEffect(() => { if (tick>0) refetch(); }, [tick]);
@@ -41,7 +43,7 @@ export default function Delivery() {
               </tr></thead>
               <tbody>
                 {(data?.items ?? []).map((r)=>(
-                  <tr key={r.executionId} className="border-b border-border">
+                  <tr key={r.executionId} onClick={() => navigate(`/delivery/${r.executionId}`)} className="border-b border-border cursor-pointer hover:bg-bg-hover/50">
                     <td className="py-2 pr-3 font-mono text-text-faint">{r.executionId.slice(0,18)}…</td>
                     <td className="py-2 pr-3">{r.taskTitle}</td>
                     <td className="py-2 pr-3"><Badge tone={r.status==="succeeded"?"ok":"accent"}>{r.status}</Badge>{r.errorCode && <span className="text-xs text-text-faint ml-2">{r.errorCode}</span>}</td>

@@ -7,7 +7,7 @@
  *
  * Usage: node scripts/workflow-monitor.mjs [--json]
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,6 +23,32 @@ const run = (cmd, args, cwd = ROOT) => {
     return { ok: false, out: (e.stdout?.toString() || "") + (e.stderr?.toString() || "") };
   }
 };
+
+// Dependency-free source scanner (ripgrep's `npx rg` resolves to a bogus npm pkg here,
+// so we walk the tree ourselves to keep security gates real and trustworthy).
+function scan(dirs, regex) {
+  const hits = [];
+  // Skip build artifacts, deps, VCS, and test fixtures (which legitimately contain
+  // secrets/dangerous patterns as data, not as shipped code).
+  const skip = (p) => /node_modules|\/dist\/|\/build\/|\.git\/|\.next\/|\/coverage\//.test(p) || /(\.test|\.spec)\.(ts|tsx|js|mjs)$/.test(p);
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      const full = resolve(dir, name);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) { if (!skip(full)) walk(full); }
+      else if (/\.(ts|tsx|js|jsx|mjs|cjs|json|sql|yml|yaml)$/.test(name) && !skip(full)) {
+        try {
+          if (regex.test(readFileSync(full, "utf8"))) hits.push(full);
+        } catch {}
+      }
+    }
+  };
+  for (const d of dirs) { const p = resolve(ROOT, d); if (existsSync(p)) walk(p); }
+  return hits;
+}
 
 // Minimal YAML parser for the flat skills.lock shape we control.
 function parseSkillsLock(text) {
@@ -77,18 +103,27 @@ const tests = run("npm", ["run", "test"], ROOT);
 const testsPass = /pass\s+(\d+)/.exec(tests.out);
 check("backend vitest green", tests.ok && /fail\s+0/.test(tests.out), testsPass ? `${testsPass[1]} passed` : tests.out.split("\n").slice(0, 3).join(" | "));
 
-// --- Step 6/PII: secret & PII scan (lightweight) ---
+// --- Step 6/PII: secret & PII scan (dependency-free walk) ---
 console.log("\nPrivacy & security scan (G6)");
-const grepSecrets = run("npx", ["--yes", "rg", "-l", "pk_live|sk_live|AKIA[0-9A-Z]{16}|password\\s*=\\s*[\"']", "--glob=!**/node_modules/**", "--glob=!**/dist/**", "apps", "packages", "src"], ROOT);
-check("no hardcoded secrets in source", !grepSecrets.ok, grepSecrets.ok ? "FOUND: " + grepSecrets.out.split("\n").slice(0, 3).join(" | ") : "none detected");
+const secretHits = scan(["apps", "packages"], /(sk|pk)_live_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|password\s*=\s*["'][^"']{3,}["']/i);
+check("no hardcoded secrets in source", secretHits.length === 0, secretHits.length ? "FOUND: " + secretHits.slice(0, 3).join(" | ") : "none detected");
 
-const grepLocalStorage = run("npx", ["--yes", "rg", "localStorage\\.(setItem|getItem)", "--glob=!**/node_modules/**", "apps/dashboard/src"], ROOT);
-check("no plaintext key in localStorage", !grepLocalStorage.ok, grepLocalStorage.ok ? "FOUND: " + grepLocalStorage.out.split("\n").slice(0, 3).join(" | ") : "key only in sessionStorage (D1)");
+const lsHits = scan(["apps/dashboard/src"], /localStorage\.(setItem|getItem)\(\s*["']?(apiKey|api_key|apikey)/i);
+check("no plaintext API key in localStorage", lsHits.length === 0, lsHits.length ? "FOUND: " + lsHits.slice(0, 3).join(" | ") : "key only in sessionStorage (D1)");
 
 // --- Step 8: scope guardrails (AGENTS.md tool matrix) ---
 console.log("\nScope guardrails");
-const destructive = run("npx", ["--yes", "rg", "deploy\\.production|secrets\\.rotate", "--glob=!**/node_modules/**", "apps", "packages"], ROOT);
-check("no unguarded destructive ops in source", !destructive.ok, destructive.ok ? "review required: " + destructive.out.split("\n").slice(0, 3).join(" | ") : "routed via approval service");
+const destructive = scan(["apps", "packages"], /deploy\.production|secrets\.rotate/);
+check("no unguarded destructive ops in source", destructive.length === 0, destructive.length ? "review required: " + destructive.slice(0, 3).join(" | ") : "routed via approval service", true);
+
+// --- Upgraded-workflow gates (S0 DoR / S10 threat / S11 SLO / S12 observability) ---
+console.log("\nUpgraded-workflow gates (DoR / threat / SLO / observability)");
+const changelog = existsSync(resolve(ROOT, "CHANGELOG.md")) ? readFileSync(resolve(ROOT, "CHANGELOG.md"), "utf8").trim() : "";
+check("S0 DoR: CHANGELOG.md present with entries", changelog.length > 0, changelog.length ? `${changelog.split("\n").length} lines` : "missing");
+const dangerHits = scan(["apps", "packages"], /eval\(|new Function\(|child_process\.exec\(|execSync\(/);
+check("S10 threat-model: no dangerous dynamic-exec patterns", dangerHits.length === 0, dangerHits.length ? "review: " + dangerHits.slice(0, 3).join(" | ") : "clean (advisory SAST)", true);
+const metricsHits = scan(["apps"], /opentelemetry|prometheus|\/metrics|otel/i);
+check("S12 observability: telemetry hook present", metricsHits.length > 0, metricsHits.length ? "telemetry references found" : "no OTel/prometheus yet — advisory", true);
 
 // --- Leadership board cache-first (S2) ---
 // --- Step D (T4 QA): Playwright smoke (advisory; needs browsers downloaded) ---

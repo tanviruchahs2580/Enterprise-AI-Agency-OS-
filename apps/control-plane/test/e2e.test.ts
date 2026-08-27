@@ -379,6 +379,33 @@ test("GET /approvals filters by decision and projectId (history tab backing)", a
   assert.ok(pids.includes(approvalId), "approval should be filterable by projectId");
 });
 
+test("GET /delivery/runs/:id returns enriched run with 15-stage pipeline", async () => {
+  const prj = await api("POST", "/api/v1/projects", { name: "Run Detail Fixture" });
+  assert.equal(prj.status, 201);
+  const projectId = String(prj.body.id);
+  const task = await api("POST", "/api/v1/tasks", { projectId, title: "build widget", description: "" });
+  assert.equal(task.status, 201);
+  const taskId = String(task.body.id);
+  const agent = ctx.db.get<{ id: string }>("SELECT id FROM agents WHERE org_id=? LIMIT 1", [ctx.defaultOrgId()]);
+  assert.ok(agent, "seeded agent must exist");
+
+  const execId = "exec_test_" + crypto.randomUUID();
+  ctx.db.insert("executions", {
+    id: execId, org_id: ctx.defaultOrgId(), task_id: taskId, agent_id: agent.id,
+    status: "succeeded", attempt: 1, trace_id: "trace_x",
+    started_at: ctx.db.now(), finished_at: ctx.db.now(), output_summary: "done",
+    error_code: null, tokens_in: 10, tokens_out: 20, cost_usd: 0.01, sandbox_id: null,
+    created_at: ctx.db.now(),
+  });
+
+  const res = await api("GET", `/api/v1/delivery/runs/${execId}`);
+  assert.equal(res.status, 200);
+  const ex = res.body.execution as { projectId: string; taskTitle: string };
+  assert.equal(ex.projectId, projectId);
+  assert.equal(ex.taskTitle, "build widget");
+  assert.ok(Array.isArray(res.body.stages) && res.body.stages.length === 15, "should expose 15 stages");
+});
+
 test("MISSIONS & WORKSTREAMS lifecycle endpoints", async () => {
   const prj = await api("POST", "/api/v1/projects", { name: "Mission Control" });
   const projectId = String(prj.body.id);

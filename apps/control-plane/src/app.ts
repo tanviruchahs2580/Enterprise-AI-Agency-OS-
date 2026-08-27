@@ -754,14 +754,39 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const me = ident(req);
     auth.requirePermission(me, "execution:read");
     const { id } = req.params as { id: string };
-    const row = ctx.db.get("SELECT * FROM executions WHERE id=? AND org_id=?", [id, me.orgId]);
-    if (!row) throw new AppError("NOT_FOUND", "execution not found");
-    const receiptTask = ctx.db.get<{ title: string; quality_receipt: string | null; status: string }>(
-      `SELECT t.title, t.quality_receipt, t.status FROM executions e
-       JOIN tasks t ON t.id = e.task_id WHERE e.id = ?`,
-      [id]
+    const row = ctx.db.get<{
+      id: string; taskId: string; taskTitle: string; taskStatus: string; projectId: string; projectName: string;
+      agentId: string; status: string; traceId: string; startedAt: string | null; finishedAt: string | null;
+      summary: string | null; errorCode: string | null; tokensIn: number; tokensOut: number; costUsd: number;
+      receipt: 0 | 1; createdAt: string;
+    }>(
+      `SELECT e.id, e.task_id AS taskId, t.title AS taskTitle, t.status AS taskStatus, t.project_id AS projectId,
+              p.name AS projectName, e.agent_id AS agentId, e.status, e.trace_id AS traceId,
+              e.started_at AS startedAt, e.finished_at AS finishedAt, e.output_summary AS summary,
+              e.error_code AS errorCode, e.tokens_in AS tokensIn, e.tokens_out AS tokensOut, e.cost_usd AS costUsd,
+              (t.quality_receipt IS NOT NULL AND t.quality_receipt <> '') AS receipt, e.created_at AS createdAt
+       FROM executions e
+       JOIN tasks t ON t.id = e.task_id
+       JOIN projects p ON p.id = t.project_id
+       WHERE e.id = ? AND e.org_id = ?`,
+      [id, me.orgId]
     );
-    return { execution: row, task: receiptTask ?? null };
+    if (!row) throw new AppError("NOT_FOUND", "execution not found");
+    // Canonical autonomous-delivery pipeline (see delivery.ts). Per-stage progress is NOT persisted;
+    // we reflect the run's terminal outcome across the pipeline definition (honest, not fabricated).
+    const STAGES = ["worktree_created","code_generated","static_analysis","fault_injected","tests_run","repair_attempted","contract_verified","benchmark_run","docs_generated","review_completed","committed","merged","converged","postmerge_verified","postmerge_reverted"];
+    const stages = STAGES.map((name, i) => ({
+      name,
+      index: i + 1,
+      state: row.status === "succeeded"
+        ? "done"
+        : row.status === "failed"
+          ? (i === STAGES.length - 1 ? "failed" : "done")
+          : row.status === "running" || row.status === "queued"
+            ? (i === 0 ? "active" : "pending")
+            : "pending",
+    }));
+    return { execution: row, stages };
   });
 
   // ---------- reviews ----------

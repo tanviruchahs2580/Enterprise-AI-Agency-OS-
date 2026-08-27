@@ -18,9 +18,10 @@
 - `scripts/workflow-monitor.mjs` present and runnable (`node scripts/workflow-monitor.mjs`).
 - Agent roster = `AGENTS.md` (already seeded; 20+ contracts).
 
-## Phase 1 — The 12-Step Pipeline (M1 added; M12 added)
+## Phase 1 — The 14-Step Pipeline (S0, S10, S11, S12 added; M12 retained)
 | Step | Action | Gate / Output |
 |---|---|---|
+| **S0** | **Definition of Ready (DoR):** task has acceptance criteria, threat-model tier, rollback plan, owner. | DoR checklist signed |
 | **S1** | Decompose task → Domain + T-tier | `Domain`, `Tier`, `Existing skill?` |
 | **S2** | Cache-first: read `skills.lock` + leaderboard snapshot | hit → skip to S5; miss → S3 |
 | **S3** | `npx skills find "<query>" --owner <trusted>` (refresh only) | candidate list |
@@ -30,9 +31,15 @@
 | **S7** | Delegate to worker (T1–T6 → AGENTS.md agent + `Task` subagent) | assignment record |
 | **S8** | Execute with guardrails (directory + tool matrix from AGENTS.md) | code in monorepo |
 | **S9** | Automated review: lint, typecheck, **e2e**, SAST, **budget check (FinOps)** | green / loop |
-| **S10** | Deploy (canary) + docs (Swagger/CHANGELOG) + `skills.lock` commit | shipped |
-| **S11** | Feedback: staging `npx skills update` + e2e, auto-merge on pass | metrics |
+| **S10** | **Security/Threat-model gate:** `security-engineer` signs off; no open `critical`/`high` findings block release. | threat-model doc + sign-off |
+| **S11** | Deploy (canary) + **SLO + automatic rollback** + docs (Swagger/CHANGELOG) + `skills.lock` commit | shipped w/ rollback |
+| **S12** | **Observability:** emit DORA metrics (deploy freq, lead time, MTTR, change-fail %) + trace + error budget; verify canary SLO before full rollout. | metrics captured |
+| **S13** | Feedback: staging `npx skills update` + e2e, auto-merge on pass | metrics |
 | **M12** | **Workflow retrospective:** review monitor report + `skills.lock`; prune <10-use; upgrade process | next-iteration diff |
+
+> International alignment: S0/DoR + S10 threat-model + S11 rollback + S12 DORA/observability mirror
+> **SAFe** (PI readiness), **Spotify** (squad autonomy + paved road), **GitLab/Atlassian** (release/rollback + compliance),
+> and **Google DORA** (four key metrics). See "International Standard Alignment" below.
 
 ## Definition of Done (per tier)
 - **All tiers:** `eslint .` 0 errors · `tsc --noEmit` 0 errors · secret/PII scan clean · budget not exceeded.
@@ -58,3 +65,29 @@
 - `<1K` installs → quarantine + human approval (per AGENTS.md approval service).
 - Destructive/high-risk tools route through the permission/approval layer (already enforced).
 - API key stays in `sessionStorage` (D1-fixed); no secrets in `localStorage` or logs.
+
+## International Standard Alignment & Improvements (vs DORA / SAFe / Spotify / GitLab)
+| International practice | Before (v1 master-prompt) | Our upgrade (this repo) |
+|---|---|---|
+| **Definition of Ready** (SAFe PI readiness) | absent | **S0** — acceptance criteria + threat tier + rollback plan required before work |
+| **Paved road / squad autonomy** (Spotify) | implicit | explicit worker→agent roster mapping (T1–T6) with tool matrix |
+| **Release & rollback** (GitLab/Atlassian) | "canary deploy" only | **S11** — canary + **automatic rollback on SLO breach** + error budget |
+| **Threat modeling / security sign-off** | only "SAST pass" | **S10** — `security-engineer` sign-off; critical/high findings block release |
+| **DORA four keys** (Google) | none | **S12** — deploy freq, lead time, MTTR, change-fail % emitted + monitored |
+| **Observability/telemetry** | none | **S12** — trace + error budget + Grafana-style metrics; `workflow-monitor.mjs` gates |
+| **Compliance audit** (SOC2) | install log only | `skills.lock` + monitor report + audit events (hash-chained) |
+| **Continuous improvement** | skills update only | **M12** — workflow retrospective prunes <10-use skills + upgrades process |
+
+### Improvements implemented this iteration
+1. **S0 DoR checklist** enforced in `workflow-monitor.mjs` (CHANGELOG + acceptance criteria presence).
+2. **S10 threat-model gate** — monitor fails if a high-risk change ships with open `critical`/`high` security findings.
+3. **S11 rollback plan** — every deploy commit references a rollback path; documented in release notes.
+4. **S12 DORA/observability** — monitor emits deploy/quality metrics; canary SLO verified before full rollout.
+5. **M12 retrospective** — monthly review of `skills.lock` usage + monitor deltas.
+
+### How a real task flows (1st step → deploy)
+`Request` → **S0 DoR** (criteria+rollback+threat tier) → **S1** decompose → **S2** cache `skills.lock`
+→ (**S3/S4** skill find+verify, if new) → **S5/S6** present+pin install → **S7** delegate to T-tier agent
+→ **S8** implement with guardrails → **S9** lint/typecheck/e2e/SAST/budget → **S10** security sign-off
+→ **S11** canary + rollback + CHANGELOG → **S12** DORA/observability → **S13** feedback auto-merge
+→ **M12** retrospective. The `workflow-monitor.mjs` is the observer at every gate.

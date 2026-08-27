@@ -8,6 +8,7 @@ import Projects from "./pages/Projects.tsx";
 import ProjectDetail from "./pages/ProjectDetail.tsx";
 import Tasks from "./pages/Tasks.tsx";
 import Delivery from "./pages/Delivery.tsx";
+import DeliveryRunDetail from "./pages/DeliveryRunDetail.tsx";
 import Agents from "./pages/Agents.tsx";
 import Models from "./pages/Models.tsx";
 import Security from "./pages/Security.tsx";
@@ -33,7 +34,8 @@ const router = createBrowserRouter([
        { path: "projects", element: <Projects /> },
        { path: "projects/:id", element: <ProjectDetail /> },
       { path: "tasks", element: <Tasks /> },
-      { path: "delivery", element: <Delivery /> },
+       { path: "delivery", element: <Delivery /> },
+       { path: "delivery/:id", element: <DeliveryRunDetail /> },
       { path: "agents", element: <Agents /> },
       { path: "models", element: <Models /> },
       { path: "security", element: <Security /> },
