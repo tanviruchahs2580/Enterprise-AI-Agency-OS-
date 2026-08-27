@@ -6,6 +6,11 @@ on:
   pull_request:
   schedule:
     - cron: "0 3 * * 1" # weekly, Monday night
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ jobs:
   secrets:
     name: secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +31,7 @@ jobs:
   dependencies:
     name: dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

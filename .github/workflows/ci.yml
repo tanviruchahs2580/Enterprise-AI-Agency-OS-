@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save CI minutes (best practice).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -13,6 +19,7 @@ jobs:
   test:
     name: lint · typecheck · test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -67,3 +74,31 @@ jobs:
           else
             echo "gate correctly rejects local profile"
           fi
+
+  # Agency self-governance gate: runs the same monitor operators use locally.
+  # Fails the build if any non-advisory gate regresses (DoR, secrets, DoD, SAST, threat, DORA).
+  governance:
+    name: agency workflow monitor (governance gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Run agency workflow monitor
+        run: node scripts/workflow-monitor.mjs | tee monitor-report.txt
+      - name: Fail on unhealthy pipeline
+        run: |
+          if grep -q "Pipeline NOT healthy" monitor-report.txt; then
+            echo "workflow monitor reported an unhealthy pipeline"; exit 1
+          fi
+          echo "workflow monitor: pipeline healthy"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workflow-monitor-report
+          path: monitor-report.txt

@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ jobs:
   build-and-smoke:
     name: build · run · smoke · persist · scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -114,11 +120,6 @@ jobs:
           echo "brace-expansion:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x brace-expansion || echo ABSENT"
           echo "undici:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x undici || echo ABSENT"
           echo "tar:"; docker run --rm --entrypoint sh agencyos-control-plane:ci -c "ls /app/node_modules | grep -x tar || echo ABSENT"
-
-      - name: Install Trivy CLI
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy --version
 
       - name: Install Trivy CLI
         run: |
