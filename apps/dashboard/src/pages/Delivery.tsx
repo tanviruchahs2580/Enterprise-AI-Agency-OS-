@@ -1,120 +1,68 @@
 import { useEffect, useState } from "react";
-import { useApi } from "../api.ts";
-import { Badge, Empty, ErrorBox, Loading, Panel, fmtTime } from "../ui.tsx";
+import { useApiQuery } from "../components/useEventStream.ts";
+import { Card, Badge, Skeleton, EmptyState } from "../components/ui.tsx";
 
-interface DeliveryRun {
-  executionId: string;
-  taskId: string;
-  taskTitle: string;
-  status: string;
-  traceId: string;
-  summary: string | null;
-  errorCode: string | null;
-  receipt: 0 | 1;
-  createdAt: string;
-  finishedAt: string | null;
-}
+interface DeliveryRun { executionId: string; taskId: string; taskTitle: string; status: string; traceId: string; summary: string | null; errorCode: string | null; receipt: 0 | 1; createdAt: string; finishedAt: string | null; }
 
-const AUTO_MS = 5000;
-
-/** PHASE 10: human-readable labels for delivery pipeline stages. */
-const STAGE_LABELS: Record<string, string> = {
-  worktree_created: "Isolated worktree",
-  code_generated: "Code generated",
-  static_analysis: "Static analysis",
-  fault_injected: "Fault injected (demo)",
-  tests_run: "Tests executed",
-  repair_attempted: "Self-heal repair",
-  contract_verified: "Contract verified",
-  benchmark_run: "Benchmark",
-  docs_generated: "Docs generated",
-  review_completed: "Review gate",
-  committed: "Committed",
-  merged: "Merged to main",
-  converged: "Converged (no net diff)",
-  postmerge_verified: "Post-merge verified",
-  postmerge_reverted: "Auto-reverted",
-};
+const STAGES = [
+  "worktree_created","code_generated","static_analysis","fault_injected","tests_run","repair_attempted",
+  "contract_verified","benchmark_run","docs_generated","review_completed","committed","merged",
+  "converged","postmerge_verified","postmerge_reverted",
+];
 
 export default function Delivery() {
-  const { data, error, loading, reload } = useApi<{ items: DeliveryRun[] }>(
-    "/delivery/runs?limit=100"
-  );
-  const items = data?.items ?? null;
+  const { data, isLoading, isError, error, refetch } = useApiQuery<{ items: DeliveryRun[] }>("delivery", "/delivery/runs?limit=100");
   const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (tick > 0) reload();
-  }, [tick]);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), AUTO_MS);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { const id = setInterval(()=>setTick((t)=>t+1), 5000); return ()=>clearInterval(id); }, []);
+  useEffect(() => { if (tick>0) refetch(); }, [tick]);
 
   return (
-    <>
-      <h1>Autonomous Delivery</h1>
-      <p className="subtitle">
-        Requirement → worktree → codegen → static analysis → tests → self-heal → contract → benchmark → docs → review → merge → post-merge.
-        Auto-refreshes every {AUTO_MS / 1000}s.
-      </p>
-
-      <div className="row" style={{ marginBottom: 14 }}>
-        <button className="secondary small" onClick={() => setTick((t) => t + 1)}>Refresh now</button>
-        {items && (
-          <span className="muted">
-            {items.filter((r) => r.status === "succeeded").length} succeeded ·{" "}
-            {items.filter((r) => r.status !== "succeeded").length} other
-          </span>
-        )}
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Autonomous Delivery</h1>
+        <p className="text-sm text-text-dim">Requirement → worktree → codegen → static analysis → tests → self-heal → contract → benchmark → docs → review → merge → post-merge. Auto-refreshes every 5s.</p>
       </div>
 
-      {loading && !items ? (
-        <Loading />
-      ) : error ? (
-        <ErrorBox message={error} />
-      ) : (items ?? []).length === 0 ? (
-        <Empty what="delivery runs — dispatch one from a ready delivery task" />
+      <div className="flex items-center gap-3">
+        <button className="bg-bg-hover text-text border border-border rounded-md px-3 py-2 text-sm" onClick={()=>refetch()}>Refresh now</button>
+        {data && <span className="text-sm text-text-dim">{data.items.filter(r=>r.status==="succeeded").length} succeeded · {data.items.filter(r=>r.status!=="succeeded").length} other</span>}
+      </div>
+
+      {isLoading ? <Skeleton className="h-40" /> : isError ? (
+        <Card><div className="text-err">{(error as Error).message}</div></Card>
+      ) : (data?.items ?? []).length === 0 ? (
+        <EmptyState title="No delivery runs yet" hint="Dispatch a ready delivery task from the Tasks page to start an autonomous run." />
       ) : (
-        <Panel title={`Runs (${items!.length})`}>
-          <table>
-            <thead>
-              <tr><th>Execution</th><th>Task</th><th>Status</th><th>Receipt</th><th>Summary</th><th>Finished</th></tr>
-            </thead>
-            <tbody>
-              {(items ?? []).map((r) => (
-                <tr key={r.executionId}>
-                  <td className="mono muted">{r.executionId.slice(0, 18)}…</td>
-                  <td>{r.taskTitle}</td>
-                  <td>
-                    <Badge>{r.status}</Badge>
-                    {r.errorCode && (
-                      <span className="muted" style={{ marginLeft: 6 }}>{r.errorCode}</span>
-                    )}
-                  </td>
-                  <td>{r.receipt ? "✓ hash-chained" : <span className="muted">—</span>}</td>
-                  <td className="muted" style={{ maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {r.summary ?? "—"}
-                  </td>
-                  <td className="muted">{r.finishedAt ? fmtTime(r.finishedAt) : "running…"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+        <Card title={`Runs (${data?.items.length ?? 0})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-[11px] uppercase tracking-wider text-text-dim border-b border-border">
+                <th className="py-2 pr-3">Execution</th><th className="py-2 pr-3">Task</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Receipt</th><th className="py-2 pr-3">Summary</th><th className="py-2">Finished</th>
+              </tr></thead>
+              <tbody>
+                {(data?.items ?? []).map((r)=>(
+                  <tr key={r.executionId} className="border-b border-border">
+                    <td className="py-2 pr-3 font-mono text-text-faint">{r.executionId.slice(0,18)}…</td>
+                    <td className="py-2 pr-3">{r.taskTitle}</td>
+                    <td className="py-2 pr-3"><Badge tone={r.status==="succeeded"?"ok":"accent"}>{r.status}</Badge>{r.errorCode && <span className="text-xs text-text-faint ml-2">{r.errorCode}</span>}</td>
+                    <td className="py-2 pr-3">{r.receipt ? <span className="text-ok">✓ hash-chained</span> : <span className="text-text-faint">—</span>}</td>
+                    <td className="py-2 pr-3 text-text-dim max-w-xs truncate">{r.summary ?? "—"}</td>
+                    <td className="py-2 text-text-faint">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : "running…"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
-      {/* PHASE 10: pipeline stage reference — human-readable gate names */}
-      <Panel title="Pipeline Stages">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {Object.entries(STAGE_LABELS).map(([key, label]) => (
-            <span key={key} className="mono muted" style={{ fontSize: 12 }}>
-              {label} <span style={{ opacity: 0.4 }}>({key})</span>
-            </span>
+      <Card title="Pipeline Stages">
+        <div className="flex flex-wrap gap-2">
+          {STAGES.map((s)=>(
+            <span key={s} className="text-xs font-mono text-text-faint bg-bg-hover border border-border rounded-full px-2.5 py-1">{s.replace(/_/g," ")}</span>
           ))}
         </div>
-      </Panel>
-    </>
+      </Card>
+    </div>
   );
 }

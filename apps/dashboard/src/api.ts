@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 
+// Security: never persist the admin key in localStorage (readable by any XSS).
+// Use sessionStorage (cleared on tab close) plus an in-memory cache so a reload
+// within the session keeps the user signed in without long-lived persistence.
+// Production should move to an httpOnly secure cookie set by the control plane.
 const KEY_STORAGE = "agencyos.apiKey";
+let memKey: string | null = null;
 
 export function getApiKey(): string {
-  return localStorage.getItem(KEY_STORAGE) ?? "";
+  if (memKey !== null) return memKey;
+  try {
+    memKey = sessionStorage.getItem(KEY_STORAGE) ?? "";
+  } catch {
+    memKey = "";
+  }
+  return memKey;
 }
 export function setApiKey(key: string): void {
-  localStorage.setItem(KEY_STORAGE, key);
+  memKey = key;
+  try {
+    if (key) sessionStorage.setItem(KEY_STORAGE, key);
+    else sessionStorage.removeItem(KEY_STORAGE);
+  } catch {}
+}
+export function clearApiKey(): void {
+  memKey = null;
+  try { sessionStorage.removeItem(KEY_STORAGE); } catch {}
 }
 
 export class ApiError extends Error {
@@ -26,13 +45,16 @@ export async function api<T = unknown>(
 ): Promise<T> {
   // Health/readiness live at the server root, everything else under /api/v1.
   const url = /^\/(health|ready|live)\b/.test(path) ? path : `/api/v1${path}`;
+  // Always send a JSON content-type so Fastify's parser accepts the request
+  // even when the body is empty (e.g. the SSE ticket exchange).
+  const hasBody = body !== undefined;
   const res = await fetch(url, {
     method,
     headers: {
-      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      "content-type": "application/json",
       authorization: `Bearer ${getApiKey()}`,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: hasBody ? JSON.stringify(body) : method === "GET" || method === "DELETE" ? undefined : "{}",
   });
   const text = await res.text();
   let json: Record<string, unknown> = {};

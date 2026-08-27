@@ -1,80 +1,55 @@
 import { useState } from "react";
-import { api, useApi } from "../api.ts";
-import { Badge, Empty, ErrorBox, Loading, Panel, fmtTime } from "../ui.tsx";
+import { api } from "../api.ts";
+import { useApiQuery } from "../components/useEventStream.ts";
+import { useToast } from "../components/Toast.tsx";
+import { Card, Badge, Button, Skeleton, EmptyState } from "../components/ui.tsx";
 
-interface Approval {
-  id: string;
-  action: string;
-  resource_type: string;
-  resource_id: string;
-  reason: string;
-  risk_level: string;
-  requested_by: string;
-  created_at: string;
-  expires_at: string;
-}
+interface Approval { id: string; action: string; resource_type: string; resource_id: string; reason: string; risk_level: string; requested_by: string; created_at: string; expires_at: string; }
 
 export default function Approvals() {
-  const { data, loading, error, reload } = useApi<{ items: Approval[] }>("/approvals/pending");
+  const { data, isLoading, isError, error, refetch } = useApiQuery<{ items: Approval[] }>("approvals", "/approvals/pending");
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const toast = useToast();
 
   function decide(id: string, decision: "approve" | "reject") {
     setBusy(id);
-    setMsg(null);
     api("POST", `/approvals/${id}/decide`, { decision })
-      .then(() => reload())
-      .catch((e: Error) => setMsg(e.message))
+      .then(() => { toast.success(`Approval ${decision}d`); refetch(); })
+      .catch((e: Error) => toast.error(e.message))
       .finally(() => setBusy(null));
   }
 
   return (
-    <>
-      <h1>Human Approval Gates</h1>
-      <p className="subtitle">
-        Production deploys, destructive migrations and secret rotation cannot proceed
-        without a human decision here.
-      </p>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Human Approval Gates</h1>
+        <p className="text-sm text-text-dim">Production deploys, destructive migrations and secret rotation cannot proceed without a human decision here.</p>
+      </div>
 
-      {msg && <ErrorBox message={msg} />}
-      {loading ? (
-        <Loading />
-      ) : error ? (
-        <ErrorBox message={error} />
+      {isLoading ? <Skeleton className="h-40" /> : isError ? (
+        <Card><div className="text-err">{(error as Error).message}</div></Card>
       ) : (data?.items ?? []).length === 0 ? (
-        <Panel title="Pending"><Empty what="pending approvals — nothing is waiting on you" /></Panel>
+        <EmptyState title="Nothing is waiting on you" hint="Pending approvals for high-risk actions will appear here." />
       ) : (
-        <div className="grid cols-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {(data?.items ?? []).map((a) => (
-            <Panel key={a.id} title={a.action}>
-              <div className="row spread">
-                <Badge>{a.risk_level}</Badge>
-                <span className="muted">{fmtTime(a.created_at)}</span>
+            <Card key={a.id}>
+              <div className="flex items-center justify-between mb-2">
+                <Badge tone={a.risk_level === "critical" ? "crit" : a.risk_level === "high" ? "err" : "warn"}>{a.risk_level}</Badge>
+                <span className="text-xs text-text-faint">{new Date(a.created_at).toLocaleString()}</span>
               </div>
-              <p>{a.reason}</p>
-              <p className="muted mono" style={{ fontSize: 11.5 }}>
-                {a.resource_type}:{a.resource_id.slice(0, 18)} · by {a.requested_by}
-              </p>
-              <div className="row">
-                <button
-                  disabled={busy === a.id}
-                  onClick={() => decide(a.id, "approve")}
-                >
-                  Approve
-                </button>
-                <button
-                  className="danger"
-                  disabled={busy === a.id}
-                  onClick={() => decide(a.id, "reject")}
-                >
-                  Reject
-                </button>
-                <span className="muted">expires {fmtTime(a.expires_at)}</span>
+              <div className="font-semibold">{a.action}</div>
+              <p className="text-sm text-text-dim mt-1">{a.reason}</p>
+              <p className="text-xs text-text-faint mt-2 font-mono">{a.resource_type}:{a.resource_id.slice(0,18)} · by {a.requested_by}</p>
+              <div className="flex items-center gap-2 mt-3">
+                <Button disabled={busy===a.id} onClick={()=>decide(a.id,"approve")}>{busy===a.id ? "…" : "Approve"}</Button>
+                <Button variant="danger" disabled={busy===a.id} onClick={()=>decide(a.id,"reject")}>Reject</Button>
+                <span className="text-xs text-text-faint ml-auto">expires {new Date(a.expires_at).toLocaleString()}</span>
               </div>
-            </Panel>
+            </Card>
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }

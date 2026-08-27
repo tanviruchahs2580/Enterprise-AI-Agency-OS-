@@ -1,55 +1,69 @@
-import { useApi } from "../api.ts";
-import { Badge, Loading, Panel } from "../ui.tsx";
-
-interface Meta {
-  name: string;
-  version: string;
-  apiVersion: string;
-  features: Record<string, boolean>;
-}
+import { useState } from "react";
+import { api } from "../api.ts";
+import { getApiKey, setApiKey, clearApiKey } from "../api.ts";
+import { useToast } from "../components/Toast.tsx";
+import { Card, Badge, Button, useTheme } from "../components/ui.tsx";
 
 export default function Settings() {
-  const meta = useApi<Meta>("/meta");
+  const [theme, setTheme] = useTheme();
+  const toast = useToast();
+  const [key, setKey] = useState(getApiKey() ?? "");
+  const [saving, setSaving] = useState(false);
 
-  if (meta.loading) return <Loading />;
-  if (meta.error) {
-    return (
-      <>
-        <h1>Settings</h1>
-        <p className="subtitle">Sign in to view platform configuration.</p>
-      </>
-    );
+  function saveKey() {
+    setSaving(true);
+    try {
+      if (key.trim()) setApiKey(key.trim());
+      else clearApiKey();
+      toast.success("API key saved (session only)");
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  }
+
+  function testHealth() {
+    api<{ status: string }>("GET", "/health")
+      .then((r)=>toast.success(`Control plane healthy (${r.status})`))
+      .catch((e: Error)=>toast.error(`Unreachable: ${e.message}`));
   }
 
   return (
-    <>
-      <h1>Settings</h1>
-      <p className="subtitle">
-        {meta.data?.name} v{meta.data?.version} · API {meta.data?.apiVersion}
-      </p>
-
-      <div className="grid cols-2">
-        <Panel title="Optional subsystems">
-          {Object.entries(meta.data?.features ?? {}).map(([k, v]) => (
-            <p key={k} className="row spread" style={{ borderBottom: "1px solid var(--border)", padding: "8px 0", margin: 0 }}>
-              <span>{k}</span> <Badge>{v ? "enabled" : "disabled"}</Badge>
-            </p>
-          ))}
-          <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-            Disabled subsystems never affect boot or core flows (feature-flag architecture).
-          </p>
-        </Panel>
-
-        <Panel title="Operational notes">
-          <ul className="muted" style={{ lineHeight: 1.9 }}>
-            <li>Database: SQLite locally; PostgreSQL required for production profiles.</li>
-            <li>Sandbox: process provider in dev; docker provider enforced in production.</li>
-            <li>Audit log is hash-chained — verify it after any incident.</li>
-            <li>API keys are stored as SHA-256 hashes only.</li>
-            <li>All high-risk actions require human approval from the Approvals page.</li>
-          </ul>
-        </Panel>
+    <div className="space-y-5 max-w-2xl">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <p className="text-sm text-text-dim">Local preferences and control-plane connection.</p>
       </div>
-    </>
+
+      <Card title="Appearance">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Theme</div>
+            <div className="text-sm text-text-dim">Light or dark, persisted to localStorage.</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant={theme==="light"?"primary":"outline"} onClick={()=>setTheme("light")}>Light</Button>
+            <Button variant={theme==="dark"?"primary":"outline"} onClick={()=>setTheme("dark")}>Dark</Button>
+            <Badge tone="low">{theme}</Badge>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="API Key">
+        <label className="block text-xs text-text-dim mb-1">Control-plane API key (stored in sessionStorage, never persisted to disk)</label>
+        <input type="password" value={key} onChange={(e)=>setKey(e.target.value)} placeholder="e.g. cpk_live_…" className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-2 focus:ring-accent/60" />
+        <div className="mt-3 flex items-center gap-2">
+          <Button onClick={saveKey} disabled={saving}>{saving ? "Saving…" : "Save key"}</Button>
+          <Button variant="outline" onClick={testHealth}>Test connection</Button>
+          {getApiKey() && <Badge tone="ok">key set</Badge>}
+        </div>
+      </Card>
+
+      <Card title="About">
+        <div className="text-sm text-text-dim space-y-1">
+          <div>Enterprise AI Agency OS · control-plane dashboard</div>
+          <div>Backend SSE, notifications, search, quality-gates, distributed rate limiting and cost governance are live.</div>
+          <div className="text-text-faint">Build your own: the agency is seeded from a contract roster, not personas.</div>
+        </div>
+      </Card>
+    </div>
   );
 }

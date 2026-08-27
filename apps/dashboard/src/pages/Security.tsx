@@ -1,71 +1,59 @@
 import { useState } from "react";
-import { useApi } from "../api.ts";
-import { Badge, Empty, ErrorBox, Loading, Panel, fmtTime } from "../ui.tsx";
+import { useApiQuery } from "../components/useEventStream.ts";
+import { Card, Badge, Skeleton, EmptyState } from "../components/ui.tsx";
 
-interface Finding {
-  id: string;
-  severity: string;
-  title: string;
-  tool: string;
-  status: string;
-  detected_at: string;
-}
+interface Finding { id: string; severity: string; title: string; tool: string; status: string; detected_at: string; }
 
 export default function Security() {
   const [severity, setSeverity] = useState("");
-  const { data, loading, error, reload } = useApi<{ items: Finding[] }>(
-    `/security/findings${severity ? `?severity=${severity}` : ""}`
+  const { data, isLoading, isError, error, refetch } = useApiQuery<{ items: Finding[] }>(
+    "findings" + severity, `/security/findings${severity ? `?severity=${severity}` : ""}`
   );
 
   return (
-    <>
-      <h1>Security Operations</h1>
-      <p className="subtitle">
-        Findings flow: detect → triage → investigate → mitigate. Critical findings block releases.
-      </p>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Security Operations</h1>
+        <p className="text-sm text-text-dim">Findings flow: detect → triage → investigate → mitigate. Critical findings block releases.</p>
+      </div>
 
-      <div className="row" style={{ marginBottom: 14 }}>
-        <label htmlFor="sev-filter" className="muted">Severity</label>
-        <select
-          id="sev-filter"
-          value={severity}
-          onChange={(e) => setSeverity(e.target.value)}
-        >
-          <option value="">All</option>
+      <div className="flex items-center gap-3">
+        <select value={severity} onChange={(e)=>setSeverity(e.target.value)} className="bg-bg border border-border rounded-md px-3 py-2 text-sm text-text">
+          <option value="">All severities</option>
           <option value="critical">critical</option>
           <option value="high">high</option>
           <option value="medium">medium</option>
           <option value="low">low</option>
         </select>
-        <button className="secondary small" onClick={reload}>Refresh</button>
+        <button className="bg-bg-hover text-text border border-border rounded-md px-3 py-2 text-sm" onClick={()=>refetch()}>Refresh</button>
       </div>
 
-      {loading ? (
-        <Loading />
-      ) : error ? (
-        <ErrorBox message={error} />
+      {isLoading ? <Skeleton className="h-40" /> : isError ? (
+        <Card><div className="text-err">{(error as Error).message}</div></Card>
       ) : (data?.items ?? []).length === 0 ? (
-        <Panel title="Findings"><Empty what="open security findings" /></Panel>
+        <EmptyState title="No open security findings" hint="Critical findings would appear here and block releases." />
       ) : (
-        <Panel title={`Findings (${data?.items.length ?? 0})`}>
-          <table>
-            <thead>
-              <tr><th>Severity</th><th>Title</th><th>Tool</th><th>Status</th><th>Detected</th></tr>
-            </thead>
-            <tbody>
-              {(data?.items ?? []).map((f) => (
-                <tr key={f.id}>
-                  <td><Badge>{f.severity}</Badge></td>
-                  <td>{f.title}</td>
-                  <td className="muted">{f.tool}</td>
-                  <td><Badge>{f.status}</Badge></td>
-                  <td className="muted">{fmtTime(f.detected_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+        <Card title={`Findings (${data?.items.length ?? 0})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-[11px] uppercase tracking-wider text-text-dim border-b border-border">
+                <th className="py-2 pr-3">Severity</th><th className="py-2 pr-3">Title</th><th className="py-2 pr-3">Tool</th><th className="py-2 pr-3">Status</th><th className="py-2">Detected</th>
+              </tr></thead>
+              <tbody>
+                {(data?.items ?? []).map((f)=>(
+                  <tr key={f.id} className="border-b border-border">
+                    <td className="py-2 pr-3"><Badge tone={f.severity}>{f.severity}</Badge></td>
+                    <td className="py-2 pr-3">{f.title}</td>
+                    <td className="py-2 pr-3 text-text-dim">{f.tool}</td>
+                    <td className="py-2 pr-3"><Badge>{f.status}</Badge></td>
+                    <td className="py-2 text-text-faint">{new Date(f.detected_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
-    </>
+    </div>
   );
 }
