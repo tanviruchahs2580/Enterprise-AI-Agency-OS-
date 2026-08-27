@@ -1,0 +1,27 @@
+# Cross-platform line-ending normalization (CI matrix: windows-latest + ubuntu-latest).
+# Forces LF in working trees so checkouts/tests do not emit "LF will be replaced by CRLF" churn.
+* text=auto eol=lf
+
+*.ts text eol=lf
+*.mts text eol=lf
+*.cts text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+# Binary / generated artifacts kept as-is.
+*.png binary
+*.jpg binary
+*.sqlite binary
+*.sqlite3 binary
+*.db binary
