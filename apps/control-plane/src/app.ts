@@ -3,7 +3,7 @@ import { AppError, sha256Hex, newToken } from "@agency/core";
 import type { Identity } from "./auth.ts";
 import { AuthService } from "./auth.ts";
 import type { AppContext } from "./context.ts";
-import { assertDeliveryDemoFlags } from "./delivery.ts";
+import { assertDeliveryDemoFlags, DELIVERY_STAGES } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 import { createRateLimitStore, routeClassFor } from "./ratelimit.ts";
 
@@ -772,20 +772,42 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       [id, me.orgId]
     );
     if (!row) throw new AppError("NOT_FOUND", "execution not found");
-    // Canonical autonomous-delivery pipeline (see delivery.ts). Per-stage progress is NOT persisted;
-    // we reflect the run's terminal outcome across the pipeline definition (honest, not fabricated).
-    const STAGES = ["worktree_created","code_generated","static_analysis","fault_injected","tests_run","repair_attempted","contract_verified","benchmark_run","docs_generated","review_completed","committed","merged","converged","postmerge_verified","postmerge_reverted"];
-    const stages = STAGES.map((name, i) => ({
-      name,
-      index: i + 1,
-      state: row.status === "succeeded"
-        ? "done"
-        : row.status === "failed"
-          ? (i === STAGES.length - 1 ? "failed" : "done")
-          : row.status === "running" || row.status === "queued"
-            ? (i === 0 ? "active" : "pending")
-            : "pending",
-    }));
+    const safeJson = (s: string): Record<string, unknown> | undefined => {
+      try { return JSON.parse(s) as Record<string, unknown>; } catch { return undefined; }
+    };
+    // Real per-stage progress is persisted in `delivery_stages` by the worker (onStage).
+    const persisted = ctx.db.all<{ stage: string; idx: number; state: string; detail: string; at: string }>(
+      "SELECT stage, idx, state, detail, at FROM delivery_stages WHERE execution_id=? ORDER BY idx",
+      [id]
+    );
+    const STAGES = DELIVERY_STAGES as readonly string[];
+    let stages: { name: string; index: number; state: string; detail?: Record<string, unknown>; at?: string }[];
+    if (persisted.length) {
+      const lastIdx = persisted[persisted.length - 1]!.idx;
+      stages = STAGES.map((name, i) => {
+        const rec = persisted.find((r) => r.stage === name);
+        let state: string;
+        if (rec) state = rec.state;
+        else if (row.status === "succeeded") state = "done";
+        else if (row.status === "failed") state = i + 1 === lastIdx + 1 ? "failed" : "pending";
+        else if (row.status === "running" || row.status === "queued") state = i + 1 <= lastIdx ? "done" : i + 1 === lastIdx + 1 ? "active" : "pending";
+        else state = "pending";
+        return {
+          name,
+          index: i + 1,
+          state,
+          detail: rec ? safeJson(rec.detail) : undefined,
+          at: rec ? rec.at : undefined,
+        };
+      });
+    } else {
+      // Nothing actually executed (e.g. blocked by governance before the pipeline).
+      stages = STAGES.map((name, i) => ({
+        name,
+        index: i + 1,
+        state: row.status === "succeeded" ? "done" : "pending",
+      }));
+    }
     return { execution: row, stages };
   });
 

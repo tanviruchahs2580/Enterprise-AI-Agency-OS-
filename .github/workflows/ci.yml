@@ -102,3 +102,23 @@ jobs:
         with:
           name: workflow-monitor-report
           path: monitor-report.txt
+
+  # End-to-end smoke (Playwright): the dashboard shell + key enterprise pages render.
+  # Degrades gracefully if the control-plane is unreachable, but still proves the UI boots.
+  e2e:
+    name: e2e smoke (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e smoke
+        working-directory: apps/dashboard
+        run: npx playwright test --reporter=line

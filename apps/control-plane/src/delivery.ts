@@ -6,6 +6,16 @@ import { AppError, newId, sha256Hex } from "@agency/core";
 import type { AppContext } from "./context.ts";
 
 /**
+ * Canonical autonomous-delivery pipeline stages (order matters). Persisted per-stage
+ * in `delivery_stages` so the run detail reflects real progress, not a synthetic list.
+ */
+export const DELIVERY_STAGES = [
+  "worktree_created", "code_generated", "static_analysis", "fault_injected", "tests_run",
+  "repair_attempted", "contract_verified", "benchmark_run", "docs_generated", "review_completed",
+  "committed", "merged", "converged", "postmerge_verified", "postmerge_reverted",
+] as const;
+
+/**
  * Phase A/F-07: fault injection and oversized repair budgets are dev-only
  * tools; production dispatches must not carry them.
  */
@@ -281,6 +291,21 @@ export async function executeDelivery(
         actorId: "delivery-worker",
         payload: { executionId: opts.executionId, ...detail },
       });
+      // Persist real per-stage progress (closes the synthetic-stages gap).
+      try {
+        ctx.db.insert("delivery_stages", {
+          id: newId("dls"),
+          org_id: opts.orgId,
+          execution_id: opts.executionId,
+          stage,
+          idx: DELIVERY_STAGES.indexOf(stage as (typeof DELIVERY_STAGES)[number]) + 1,
+          state: "done",
+          detail: JSON.stringify(detail ?? {}),
+          at: ctx.db.now(),
+        });
+      } catch (e) {
+        ctx.log?.warn?.("delivery stage persist failed", { stage, error: String(e) });
+      }
     },
   });
 

@@ -20,9 +20,11 @@
     "dev": "node scripts/dev.mjs",
     "self-test": "node scripts/self-test.mjs",
     "migrate": "node scripts/migrate.mjs",
-    "seed": "node scripts/seed.mjs"
+    "seed": "node scripts/seed.mjs",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.3.0",
     "eslint": "^9.33.0",
     "playwright": "^1.62.1",

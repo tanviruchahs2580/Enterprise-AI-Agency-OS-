@@ -1,0 +1,9 @@
+# Default code owners for the Agency OS monorepo.
+# Require review from an owner before merge to protected branches.
+*                       @tanviruchahs2580
+/.github/               @tanviruchahs2580
+/apps/control-plane/    @tanviruchahs2580
+/apps/dashboard/        @tanviruchahs2580
+/packages/              @tanviruchahs2580
+/scripts/               @tanviruchahs2580
+/docs/                  @tanviruchahs2580
