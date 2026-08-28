@@ -72,14 +72,24 @@ export function useApiQuery<T>(key: string, path: string, options?: { refetchInt
     queryKey: [key],
     queryFn: async () => {
       const key2 = getApiKey();
-      const res = await fetch(path.startsWith("/") && !path.startsWith("/api") ? path : `/api/v1${path}`, {
-        headers: { authorization: `Bearer ${key2}` },
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(err.error?.message ?? res.statusText);
+      const url = path.startsWith("/") && !path.startsWith("/api") ? path : `/api/v1${path}`;
+      const res = await fetch(url, { headers: { authorization: `Bearer ${key2}` } });
+      const ct = res.headers.get("content-type") ?? "";
+      const text = await res.text();
+      if (!ct.includes("application/json") && text.trimStart().startsWith("<")) {
+        throw new Error("Control plane unreachable (received HTML). Is the API server running on :3000 and reachable from this dashboard?");
       }
-      return (await res.json()) as T;
+      let json: unknown = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error("Control plane returned a non-JSON response.");
+      }
+      if (!res.ok) {
+        const err = (json as { error?: { message?: string } }).error ?? { message: res.statusText };
+        throw new Error(err.message ?? res.statusText);
+      }
+      return json as T;
     },
     refetchInterval: options?.refetchInterval,
     retry: 1,

@@ -56,12 +56,16 @@ export async function api<T = unknown>(
     },
     body: hasBody ? JSON.stringify(body) : method === "GET" || method === "DELETE" ? undefined : "{}",
   });
+  const ct = res.headers.get("content-type") ?? "";
   const text = await res.text();
+  if (!ct.includes("application/json") && text.trimStart().startsWith("<")) {
+    throw new ApiError(502, "BAD_GATEWAY", "Control plane unreachable (received HTML). Is the API server running on :3000?");
+  }
   let json: Record<string, unknown> = {};
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
-    /* non-JSON (SSE etc.) */
+    throw new ApiError(502, "BAD_GATEWAY", "Control plane returned a non-JSON response.");
   }
   if (!res.ok) {
     const err = (json as { error?: { code?: string; message?: string } }).error ?? {};

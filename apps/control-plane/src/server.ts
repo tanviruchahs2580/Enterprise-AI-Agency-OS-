@@ -68,6 +68,13 @@ async function main(): Promise<void> {
     clearInterval(sweeper);
     ctx.jobs.stop();
     await app.close();
+    // Explicitly release the database handle so WAL frames are checkpointed
+    // before the process exits (graceful, durable shutdown).
+    try {
+      ctx.db.close();
+    } catch {
+      // best-effort during shutdown
+    }
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

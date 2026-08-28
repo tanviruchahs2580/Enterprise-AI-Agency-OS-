@@ -1,7 +1,21 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+
+/**
+ * Normalize a SQLite DATABASE_URL into a safe, absolute filesystem path.
+ *
+ * `file://` URLs are passed through (node:sqlite understands them natively);
+ * relative paths are resolved against the process working directory so behavior
+ * is deterministic across launch locations.
+ */
+function normalizeSqlitePath(url: string): string {
+  if (url === ":memory:") return url;
+  if (url.startsWith("file://")) return url;
+  return isAbsolute(url) ? url : resolve(process.cwd(), url);
+}
 
 export type Row = Record<string, unknown>;
 type SqlParams = Parameters<StatementSync["run"]>;
@@ -32,7 +46,8 @@ export class SqliteDriver implements DatabaseDriver {
 
   constructor(file: string) {
     if (file !== ":memory:") {
-      mkdirSync(dirname(file), { recursive: true });
+      const realPath = file.startsWith("file://") ? fileURLToPath(file) : file;
+      mkdirSync(dirname(realPath), { recursive: true });
     }
     this.db = new DatabaseSync(file);
     this.db.exec("PRAGMA journal_mode = WAL;");
@@ -71,6 +86,14 @@ export class SqliteDriver implements DatabaseDriver {
 
   close(): void {
     if (this.db) {
+      // Guarantee committed WAL frames are folded back into the main database
+      // file before the handle is released, so a subsequent process (or a
+      // crash-restart) never reads a database missing recent transactions.
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch {
+        // best-effort: a closed/readonly handle must not block shutdown
+      }
       this.db.close();
       this.db = null; // idempotent — double close is a no-op
     }
@@ -88,5 +111,5 @@ export function openDatabase(url: string): DatabaseDriver {
     const mod = require("./pgdriver.ts") as PgDriverModule;
     return new mod.PostgresDriver(url);
   }
-  return new SqliteDriver(url);
+  return new SqliteDriver(normalizeSqlitePath(url));
 }

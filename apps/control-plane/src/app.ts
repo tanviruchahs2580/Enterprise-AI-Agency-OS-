@@ -355,6 +355,59 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return row;
   });
 
+  // ---------- project agents (team) ----------
+  app.post("/api/v1/projects/:id/agents", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:update");
+    const { id } = req.params as { id: string };
+    ensureProject(ctx, me.orgId, id);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["agentId"]);
+    const agent = ctx.db.get<{ id: string; name: string; role: string }>(
+      "SELECT id, name, role FROM agents WHERE id=? AND org_id=?", [String(body.agentId), me.orgId]);
+    if (!agent) throw new AppError("NOT_FOUND", "agent not found");
+    const existing = ctx.db.get("SELECT id FROM project_agents WHERE project_id=? AND agent_id=?", [id, agent.id]);
+    if (existing) { reply.code(200); return { id: String(existing.id), alreadyMember: true }; }
+    const paId = cryptoRandomId("pma");
+    ctx.db.insert("project_agents", {
+      id: paId, org_id: me.orgId, project_id: id, agent_id: agent.id,
+      role_in_project: body.roleInProject ? String(body.roleInProject) : "member",
+      added_by: me.userId, created_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "project.agent.added", "project", id, "low", { agentId: agent.id });
+    reply.code(201);
+    return { id: paId };
+  });
+
+  app.get("/api/v1/projects/:id/agents", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:read");
+    const { id } = req.params as { id: string };
+    ensureProject(ctx, me.orgId, id);
+    const items = ctx.db.all(
+      `SELECT pa.id AS paId, pa.role_in_project AS roleInProject, pa.created_at AS joinedAt,
+              a.id AS agentId, a.name, a.role, a.description, a.status, a.model_policy AS modelPolicy,
+              a.budget_usd AS budgetUsd, a.allowed_tools AS allowedTools, a.forbidden_tools AS forbiddenTools,
+              a.max_iterations AS maxIterations, a.timeout_ms AS timeoutMs, a.heartbeat_at AS heartbeatAt
+       FROM project_agents pa JOIN agents a ON a.id = pa.agent_id
+       WHERE pa.project_id = ? AND pa.org_id = ?
+       ORDER BY a.role, a.name`,
+      [id, me.orgId]
+    );
+    return { items };
+  });
+
+  app.delete("/api/v1/projects/:id/agents/:agentId", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "project:update");
+    const { id, agentId } = req.params as { id: string; agentId: string };
+    ensureProject(ctx, me.orgId, id);
+    ctx.db.run("DELETE FROM project_agents WHERE project_id=? AND agent_id=? AND org_id=?", [id, agentId, me.orgId]);
+    auditEvent(ctx, me, "project.agent.removed", "project", id, "low", { agentId });
+    reply.code(204);
+    return null;
+  });
+
   // ---------- requirements ----------
   app.post("/api/v1/projects/:id/requirements", async (req, reply) => {
     const me = ident(req);
