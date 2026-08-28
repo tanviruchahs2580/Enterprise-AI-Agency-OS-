@@ -8,6 +8,7 @@
     { "path": "packages/orchestration" },
     { "path": "packages/integrations" },
     { "path": "packages/delivery" },
+    { "path": "packages/scraper" },
     { "path": "apps/control-plane" }
   ]
 }

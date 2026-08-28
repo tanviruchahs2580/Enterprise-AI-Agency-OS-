@@ -791,6 +791,97 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { executionId: execId, traceId, status: "queued" };
   });
 
+  // ---------- scraping (deterministic crawler worker) ----------
+  app.post("/api/v1/scrape", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "scrape:create");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["url"]);
+
+    const url = String(body.url);
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new AppError("VALIDATION_ERROR", "url must be an absolute http(s) URL");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new AppError("VALIDATION_ERROR", "url must be http(s)");
+    }
+
+    const jobId = cryptoRandomId("scr");
+    const config = {
+      seeds: [url],
+      render: (String(body.render ?? "auto")) as "auto" | "static" | "js",
+      extract: (String(body.extract ?? "auto")) as "css" | "auto" | "llm" | "meta",
+      depth: body.depth != null ? Number(body.depth) : 0,
+      maxPages: body.maxPages != null ? Number(body.maxPages) : 25,
+      followLinks: body.followLinks != null ? Boolean(body.followLinks) : true,
+      respectRobots: body.respectRobots != null ? Boolean(body.respectRobots) : true,
+      redactPii: body.redactPii != null ? Boolean(body.redactPii) : true,
+      politenessDelayMs: body.politenessDelayMs != null ? Number(body.politenessDelayMs) : 500,
+      rules: Array.isArray(body.rules) ? (body.rules as never) : undefined,
+      proxyUrl: body.proxyUrl ? String(body.proxyUrl) : undefined,
+      tenantId: me.orgId,
+    };
+
+    ctx.db.insert("scrape_jobs", {
+      id: jobId,
+      org_id: me.orgId,
+      created_by: me.userId,
+      seed_url: url,
+      config_json: JSON.stringify(config),
+      status: "queued",
+      created_at: ctx.db.now(),
+    });
+
+    ctx.jobs.enqueue({
+      orgId: me.orgId,
+      type: "scrape_task",
+      data: { jobId },
+      idempotencyKey: `scrape:${jobId}`,
+    });
+
+    auditEvent(ctx, me, "scrape.submitted", "scrape_job", jobId, "medium", { url, depth: config.depth });
+    publishEvent(ctx, me.orgId, me, "ScrapeSubmitted", { jobId, url });
+    reply.code(202);
+    return { jobId, status: "queued" };
+  });
+
+  app.get("/api/v1/scrape", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "scrape:read");
+    const q = req.query as { limit?: string };
+    const items = ctx.db.all(
+      `SELECT id, seed_url, status, created_at, finished_at
+         FROM scrape_jobs WHERE org_id = ? ORDER BY created_at DESC LIMIT ?`,
+      [me.orgId, Math.min(200, Number(q.limit ?? 50))]
+    );
+    return { items };
+  });
+
+  app.get("/api/v1/scrape/:id", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "scrape:read");
+    const { id } = req.params as { id: string };
+    const row = ctx.db.get<{
+      id: string; org_id: string; seed_url: string; status: string;
+      config_json: string; result_json: string | null; error: string | null;
+      created_at: string; finished_at: string | null;
+    }>("SELECT * FROM scrape_jobs WHERE id=? AND org_id=?", [id, me.orgId]);
+    if (!row) throw new AppError("NOT_FOUND", "scrape job not found");
+    return {
+      id: row.id,
+      seedUrl: row.seed_url,
+      status: row.status,
+      config: JSON.parse(row.config_json),
+      result: row.result_json ? JSON.parse(row.result_json) : null,
+      error: row.error,
+      createdAt: row.created_at,
+      finishedAt: row.finished_at,
+    };
+  });
+
   // Recent autonomous delivery runs (dashboard Delivery page).
   app.get("/api/v1/delivery/runs", async (req) => {
     const me = ident(req);

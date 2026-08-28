@@ -13,7 +13,8 @@ export type Permission =
   | "knowledge:read" | "knowledge:write"
   | "audit:read" | "audit:verify"
   | "settings:read" | "settings:write"
-  | "budget:manage";
+  | "budget:manage"
+  | "scrape:create" | "scrape:read";
 
 export const PERMISSIONS = [
   "project:read", "project:create", "project:update", "project:delete",
@@ -29,6 +30,7 @@ export const PERMISSIONS = [
   "audit:read", "audit:verify",
   "settings:read", "settings:write",
   "budget:manage",
+  "scrape:create", "scrape:read",
 ] as const;
 
 export type Role =
@@ -38,13 +40,14 @@ export type Role =
 const READ_ONLY: Permission[] = [
   "project:read", "agent:read", "execution:read", "model:read",
   "security:read", "deployment:read", "knowledge:read",
-  "audit:read", "settings:read",
+  "audit:read", "settings:read", "scrape:read",
 ];
 
 const ENGINEERING: Permission[] = [
   ...READ_ONLY,
   "task:create", "task:update", "mission:update",
   "knowledge:write", "execution:control", "approval:request",
+  "scrape:create",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {

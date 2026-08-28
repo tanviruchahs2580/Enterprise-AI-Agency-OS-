@@ -1,5 +1,6 @@
 import type { AppContext } from "./context.ts";
 import { pmDecompose } from "./specialists.ts";
+import { runScrapeJob, type ScraperConfig } from "@agency/scraper";
 
 /**
  * Background worker handlers. Long-running operations run here, never inside
@@ -152,6 +153,47 @@ export function registerWorkers(ctx: AppContext): void {
       throw e; // let job queue retry/dead-letter
     } finally {
       if (agentRow) ctx.agents.setStatus(exec.org_id, String(agentRow.id), "idle");
+    }
+  });
+
+  // ---------- scraping worker ----------
+  ctx.jobs.register("scrape_task", async (job) => {
+    const data = (job.payload as { data?: { jobId?: string } }).data ?? {};
+    const jobId = String(data.jobId ?? "");
+    if (!jobId) throw new Error("scrape_task missing jobId in payload");
+
+    const row = ctx.db.get<{ id: string; org_id: string; config_json: string; status: string }>(
+      "SELECT id, org_id, config_json, status FROM scrape_jobs WHERE id=?",
+      [jobId]
+    );
+    if (!row) throw new Error(`scrape job ${jobId} not found`);
+    // idempotency: already terminal
+    if (row.status === "succeeded" || row.status === "failed") return;
+
+    ctx.db.updateById("scrape_jobs", jobId, { status: "running" });
+    publish(ctx, row.org_id, "ScrapeStarted", { jobId });
+
+    try {
+      const config = JSON.parse(row.config_json) as ScraperConfig;
+      const result = await runScrapeJob(config, jobId);
+      ctx.db.updateById("scrape_jobs", jobId, {
+        status: "succeeded",
+        result_json: JSON.stringify(result),
+        finished_at: ctx.db.now(),
+      });
+      publish(ctx, row.org_id, "ScrapeFinished", {
+        jobId,
+        status: "succeeded",
+        stats: result.stats,
+      });
+    } catch (e) {
+      ctx.db.updateById("scrape_jobs", jobId, {
+        status: "failed",
+        error: e instanceof Error ? e.message : String(e),
+        finished_at: ctx.db.now(),
+      });
+      publish(ctx, row.org_id, "ScrapeFinished", { jobId, status: "failed" });
+      throw e; // let job queue retry/dead-letter
     }
   });
 }
