@@ -104,9 +104,10 @@ jobs:
           path: monitor-report.txt
 
   # End-to-end smoke (Playwright): the dashboard shell + key enterprise pages render.
-  # Requires a reachable control-plane (the test comment + Vite proxy target :3000).
-  # We start the control-plane here with a generated bootstrap key and let the
-  # smoke test sign in with that key, so auth + protected routes actually resolve.
+  # The dashboard auto-authenticates against a local control plane via its built-in
+  # `demo-key` fallback (see apps/dashboard/src/api.ts), so we start the control-plane
+  # with ADMIN_BOOTSTRAP_KEY=demo-key to match. This exercises the real shell,
+  # protected routes and data-backed pages without a brittle interactive sign-in.
   e2e:
     name: e2e smoke (Playwright)
     runs-on: ubuntu-latest
@@ -125,16 +126,12 @@ jobs:
         env:
           NODE_ENV: local
         run: |
-          E2E_KEY=$(node -e "console.log('k-'+require('crypto').randomBytes(12).toString('hex'))")
-          echo "E2E_KEY=$E2E_KEY" >> "$GITHUB_ENV"
           node scripts/migrate.mjs
-          ADMIN_BOOTSTRAP_KEY="$E2E_KEY" PORT=3000 HOST=127.0.0.1 NODE_ENV=local nohup node apps/control-plane/src/server.ts > /tmp/control-plane.log 2>&1 &
+          ADMIN_BOOTSTRAP_KEY=demo-key PORT=3000 HOST=127.0.0.1 NODE_ENV=local nohup node apps/control-plane/src/server.ts > /tmp/control-plane.log 2>&1 &
           for i in $(seq 1 40); do curl -sf http://127.0.0.1:3000/health && break; sleep 1; done
           echo "control-plane health: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health)"
       - name: Run e2e smoke
         working-directory: apps/dashboard
-        env:
-          E2E_API_KEY: ${{ env.E2E_KEY }}
         run: npx playwright test --reporter=line
       - name: Stop control-plane
         if: always()

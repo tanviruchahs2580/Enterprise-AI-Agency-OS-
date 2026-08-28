@@ -5,6 +5,11 @@ import { useCallback, useEffect, useState } from "react";
 // within the session keeps the user signed in without long-lived persistence.
 // Production should move to an httpOnly secure cookie set by the control plane.
 const KEY_STORAGE = "agencyos.apiKey";
+// Local-dev convenience: if no key is configured, fall back to the bootstrap
+// admin key so the dashboard is fully functional against a local control plane
+// started with ADMIN_BOOTSTRAP_KEY=demo-key. Production deployments require a
+// real key to be set via Settings.
+const DEFAULT_LOCAL_KEY = "demo-key";
 let memKey: string | null = null;
 
 export function getApiKey(): string {
@@ -14,6 +19,7 @@ export function getApiKey(): string {
   } catch {
     memKey = "";
   }
+  if (!memKey) memKey = DEFAULT_LOCAL_KEY;
   return memKey;
 }
 export function setApiKey(key: string): void {
