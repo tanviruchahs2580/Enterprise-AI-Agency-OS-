@@ -72,7 +72,7 @@ export function useApiQuery<T>(key: string, path: string, options?: { refetchInt
     queryKey: [key],
     queryFn: async () => {
       const key2 = getApiKey();
-      const url = path.startsWith("/") && !path.startsWith("/api") ? path : `/api/v1${path}`;
+      const url = path.startsWith("/api/v1") ? path : `/api/v1${path}`;
       const res = await fetch(url, { headers: { authorization: `Bearer ${key2}` } });
       const ct = res.headers.get("content-type") ?? "";
       const text = await res.text();

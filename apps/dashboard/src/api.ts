@@ -43,8 +43,9 @@ export async function api<T = unknown>(
   path: string,
   body?: unknown
 ): Promise<T> {
-  // Health/readiness live at the server root, everything else under /api/v1.
-  const url = /^\/(health|ready|live)\b/.test(path) ? path : `/api/v1${path}`;
+  // All control-plane routes are served under /api/v1 (including health/readiness
+  // aliases) so the Vite dev proxy forwards them to the API instead of serving SPA HTML.
+  const url = path.startsWith("/api/v1") ? path : `/api/v1${path}`;
   // Always send a JSON content-type so Fastify's parser accepts the request
   // even when the body is empty (e.g. the SSE ticket exchange).
   const hasBody = body !== undefined;

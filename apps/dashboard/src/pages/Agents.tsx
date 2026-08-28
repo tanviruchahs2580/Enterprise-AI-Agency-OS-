@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useApiQuery } from "../components/useEventStream.ts";
-import { Card, Badge, Skeleton, EmptyState } from "../components/ui.tsx";
+import { Card, Badge, Skeleton, EmptyState, StatCard } from "../components/ui.tsx";
 
 interface Agent {
   id: string;
@@ -36,12 +36,24 @@ export default function Agents() {
   if (isLoading) return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{Array.from({length:6}).map((_,i)=><Skeleton key={i} className="h-44"/>)}</div>;
   if (isError) return <Card><div className="text-err">{(error as Error).message}</div><button className="mt-3 bg-accent text-white rounded-md px-3 py-2 text-sm" onClick={()=>refetch()}>Retry</button></Card>;
 
+  const all = data?.items ?? [];
+  const byRole = all.reduce<Record<string, number>>((m, a) => { m[a.role] = (m[a.role] ?? 0) + 1; return m; }, {});
+  const busy = all.filter((a) => a.status === "busy").length;
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Agent Fleet</h1>
         <p className="text-sm text-text-dim">Specialist roster with per-agent tool contracts, model tier and budgets.</p>
       </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard value={all.length} label="Total agents" />
+        <StatCard value={busy} label="Busy now" tone={busy ? "accent" : "ok"} />
+        <StatCard value={Object.keys(byRole).length} label="Distinct roles" />
+        <StatCard value={all.reduce((s, a) => s + (a.budget_usd ?? 0), 0).toFixed(2)} label="Combined budget cap ($)" tone="warn" />
+      </div>
+
       {(data?.items ?? []).length === 0 ? (
         <EmptyState title="No agents seeded" hint="The roster is populated on first boot via the seed script." />
       ) : (

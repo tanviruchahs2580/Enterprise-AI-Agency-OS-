@@ -7,7 +7,7 @@ import { assertDeliveryDemoFlags, DELIVERY_STAGES } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 import { createRateLimitStore, routeClassFor } from "./ratelimit.ts";
 
-const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics"]);
+const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics", "/api/v1/health", "/api/v1/ready", "/api/v1/live", "/api/v1/metrics"]);
 
 /** One-time, short-TTL tickets so EventSource never carries the API key. */
 interface SseTicket {
@@ -179,9 +179,9 @@ export function buildApp(ctx: AppContext): FastifyInstance {
   };
 
   // ---------- public meta & health ----------
-  app.get("/health", async () => ({ status: "ok", service: "control-plane" }));
-  app.get("/live", async () => ({ status: "alive" }));
-  app.get("/ready", async () => {
+  const healthHandler = async () => ({ status: "ok", service: "control-plane" });
+  const liveHandler = async () => ({ status: "alive" });
+  const readyHandler = async () => {
     try {
       ctx.db.get("SELECT 1 AS ok");
       const dlq = ctx.jobs.stats(ctx.defaultOrgId())["dead_letter"] ?? 0;
@@ -195,7 +195,13 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     } catch (e) {
       throw new AppError("DEPENDENCY_UNAVAILABLE", `readiness failed: ${String(e)}`);
     }
-  });
+  };
+  app.get("/health", healthHandler);
+  app.get("/api/v1/health", healthHandler);
+  app.get("/live", liveHandler);
+  app.get("/api/v1/live", liveHandler);
+  app.get("/ready", readyHandler);
+  app.get("/api/v1/ready", readyHandler);
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
@@ -1370,11 +1376,22 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     auth.requirePermission(me, "audit:verify");
     return ctx.audit.verify(me.orgId);
   });
-
-  app.get("/metrics", async () => {
-    // Prometheus text format — no auth (contains no tenant data), standard scrape target.
-    return metrics.render(ctx);
+  app.get("/api/v1/audit/events", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "audit:read");
+    const q = req.query as { limit?: string; beforeSeq?: string };
+    return {
+      items: ctx.audit.list(
+        me.orgId,
+        Math.min(500, Number(q.limit ?? 100)),
+        q.beforeSeq ? Number(q.beforeSeq) : undefined
+      ),
+    };
   });
+
+  const metricsHandler = async () => metrics.render(ctx);
+  app.get("/metrics", metricsHandler);
+  app.get("/api/v1/metrics", metricsHandler);
 
   // ---------- SSE ticket exchange ----------
   app.post("/api/v1/events/ticket", async (req, reply) => {
