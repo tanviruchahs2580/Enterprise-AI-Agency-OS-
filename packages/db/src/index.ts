@@ -78,6 +78,11 @@ export class Db {
   now(): string {
     return new Date().toISOString();
   }
+
+  /** Release the underlying driver handle (checkpoints WAL, closes the DB). */
+  close(): void {
+    this.driver.close();
+  }
 }
 
 export function genId(prefix: string): string {
