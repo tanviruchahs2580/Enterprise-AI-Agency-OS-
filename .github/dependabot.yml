@@ -1,28 +1,18 @@
 version: 2
+
 updates:
-  - package-ecosystem: npm
-    directory: /
+  - package-ecosystem: "npm"
+    directory: "/"
     schedule:
-      interval: weekly
-    groups:
-      dev-toolchain:
-        dependency-type: development
-    ignore:
-      # major bumps of runtime-critical libs go through explicit ADRs
-      - dependency-name: "fastify"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      # TypeScript 7 breaks typescript-eslint peer range — gate via ADR first
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
 
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
-
-  - package-ecosystem: docker
-    directory: /docker
-    schedule:
-      interval: weekly
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
