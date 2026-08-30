@@ -1,0 +1,29 @@
+name: dependency-patch
+description: >-
+  Routine dependency bump with regression verification. Concise and reversible;
+  skips architectural work on low-risk runs but never waives review, tests, or
+  the deploy approval.
+stages:
+  - name: scan
+    agentRole: security-engineer
+    description: Identify outdated/vulnerable deps and breaking-change potential
+  - name: architecture
+    agentRole: architect
+    lowRiskSkip: true
+    description: Architectural impact assessment — unnecessary for low-risk bumps
+  - name: patch
+    agentRole: backend-engineer
+    retry:
+      maxAttempts: 2
+  - name: review
+    agentRole: code-reviewer
+  - name: tests
+    agentRole: qa-engineer
+  - name: deploy
+    agentRole: devops-engineer
+    approvalRequired: true
+    approvalAction: deploy:staging
+  - name: monitor
+    agentRole: sre
+    lowRiskSkip: true
+    description: Long-tail regression watch for non-behavioral patches

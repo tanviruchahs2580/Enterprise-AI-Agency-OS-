@@ -34,7 +34,10 @@ budget:
 privacy:
   pii_scan: true
   no_exfiltration: true
-  secret_store: sessionStorage   # D1-fixed; prod target httpOnly cookie
+  # Audit Phase 1.2 (shipped): httpOnly SameSite-Strict session cookie issued by
+  # POST /api/v1/auth/session. The raw API key exists only in module scope during
+  # the exchange — never in sessionStorage/localStorage.
+  secret_store: httpOnly-cookie
 
 monitor:
   script: scripts/workflow-monitor.mjs

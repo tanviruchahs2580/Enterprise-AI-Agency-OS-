@@ -1,0 +1,51 @@
+name: adr-writing
+version: 1.0.0
+description: >-
+  Record an architecture decision: context, decision, consequences, and status.
+  Drafted in modify-mode for decisions that change an existing documented
+  design; persisted as kind=decision knowledge documents with ADR numbering.
+inputs:
+  type: object
+  required:
+    - context
+    - options
+    - chosenOption
+  properties:
+    context:
+      type: string
+      description: Forces and constraints driving the decision
+    options:
+      type: array
+      items:
+        type: string
+    chosenOption:
+      type: string
+      description: Option selected with rationale
+outputs:
+  type: object
+  properties:
+    adrId:
+      type: string
+    status:
+      type: string
+      description: proposed | accepted | superseded
+preconditions:
+  - A design change is being made to an existing architecture (modify mode)
+  - Options have been evaluated against the context forces
+procedure:
+  - "Write context: forces, constraints, and why the decision is relevant today"
+  - List all options considered and why each was rejected or chosen
+  - State the decision as a single clear statement
+  - List positive and negative consequences explicitly
+  - Persist as kind=decision with status
+verification: "The ADR is self-contained: a reader needs no other document to know what was decided and why."
+failureHandling: >-
+  Missing context or an unsupported choice is rejected; drafting halts rather
+  than recording an empty decision.
+requiredTools:
+  - fs.workspace
+  - knowledge.write
+  - task.read
+requiredPermissions:
+  - knowledge:write
+  - architecture:write

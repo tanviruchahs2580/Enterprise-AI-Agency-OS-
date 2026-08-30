@@ -42,7 +42,24 @@ fulfills the machine-side planning duties.
 
 ## Registering skills
 
-Skills are data, not code. Store definitions as JSON/YAML under
-`workflows/skills/` (v0.2 ships the loader; the schema above is the contract —
-see ROADMAP). Agents reference skills by name in their contracts; permission
-checks always resolve through the tool risk matrix regardless of skill claims.
+Skills are data, not code. Store definitions as YAML under `workflows/skills/`
+and they are validated at boot by `packages/skills` (strict mode validates the
+schema contract; control plane mounts permissively at runtime and logs issues
+via `SkillRegistry`). Eight skills ship today:
+
+`tdd-red-green-refactor` · `threat-model-stride` · `srs-authoring` ·
+`acceptance-criteria` · `coverage-gate-80-60` · `adr-writing` · `diataxis-map` ·
+`cited-research`
+
+Available over the API:
+
+- `GET /api/v1/skills` — all registered skills (name/version/description)
+- `GET /api/v1/skills/:name` — full definition including `procedure`,
+  `verification`, `requiredTools`, `requiredPermissions`
+- Agent contracts declare `skills: string[]` by name; permission checks always
+  resolve through the tool risk matrix regardless of skill claims.
+
+New skills: author `workflows/skills/<name>.yaml` (mind YAML quoting — quote
+step text containing `: `), add a unit test in `packages/skills/test/`, and
+reference the skill name from the owning agent contract in
+`packages/orchestration/src/agents.ts`.

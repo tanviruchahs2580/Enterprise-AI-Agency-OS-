@@ -1,0 +1,153 @@
+# Enterprise AI Agency OS — Helm values
+#
+# Mirrors docker-compose.yml (production profile) so the two deployment
+# targets stay behaviorally identical. Secrets should be provisioned through
+# your operator stack (External Secrets Operator / Vault Secret Operator);
+# the chart renders an inline Secret only when `controlPlane.secret` is set.
+
+replicaCount: 1
+
+image:
+  controlPlane:
+    repository: agencyos/control-plane
+    tag: "0.10.0"
+    pullPolicy: IfNotPresent
+  dashboard:
+    repository: agencyos/dashboard
+    tag: "0.10.0"
+    pullPolicy: IfNotPresent
+
+# Control plane service name — the shipped dashboard image proxies /api/ to
+# http://control-plane:3000, so keep this unless you rebuild the image.
+serviceName: control-plane
+
+# ---------------------------------------------------------------------------
+# Control plane
+# ---------------------------------------------------------------------------
+controlPlane:
+  port: 3000
+  sandboxProvider: process # container-isolated execution (A4)
+  defaultDailyBudgetUsd: "25"
+  modelProviderBaseUrl: ""
+  secretBackend: env # env | vault
+  vault:
+    addr: ""
+    kvMount: "secret"
+    pathPrefix: ""
+    namespace: ""
+  # Inline secret material (dev / simple deployments). For production use
+  # existingSecret + External Secrets Operator instead.
+  secret: {}
+    # DATABASE_URL: "postgres://agency:PASSWORD@agency-os-postgresql:5432/agencyos"
+    # ADMIN_BOOTSTRAP_KEY: "change-me"
+    # MODEL_PROVIDER_API_KEY: ""
+    # WEBHOOK_OUTBOUND_SECRET: ""
+    # VAULT_ROLE_ID: ""
+    # VAULT_SECRET_ID: ""
+  # Name of a pre-provisioned Kubernetes Secret to envFrom (recommended). It
+  # must contain every value you did not provide elsewhere, e.g.:
+  #   DATABASE_URL, ADMIN_BOOTSTRAP_KEY, MODEL_PROVIDER_API_KEY, …
+  existingSecret: ""
+  # Extra plain (non-secret) environment variables injected directly.
+  extraEnv: []
+    # - name: OIDC_ISSUER
+    #   value: https://identity.example.com
+    # - name: OIDC_CLIENT_ID
+    #   value: agency-os
+  # SQLite profile only: storage class for the /app/data PVC.
+  sqliteStorageClass: ""
+  # Splats of destination CIDRs/namespace selectors the control plane may reach
+  # (e.g. model providers) when the default-deny egress policy is enforced.
+  egressAllow: []
+    # - namespaceSelector: {}
+    #   podSelector: { matchLabels: { app: proxy } }
+  resources:
+    limits:
+      cpu: "1.5"
+      memory: 768Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Dashboard (nginx static SPA)
+# ---------------------------------------------------------------------------
+dashboard:
+  port: 8080
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# PostgreSQL (optional, default on for Kubernetes)
+# ---------------------------------------------------------------------------
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  database: agencyos
+  user: agency
+  # Password source. Either inline here (dev only) or a pre-provisioned
+  # Secret holding the key POSTGRES_PASSWORD.
+  password: ""
+  existingSecret: ""
+  storage: 10Gi
+  storageClass: ""
+  resources:
+    limits:
+      cpu: "1"
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# ---------------------------------------------------------------------------
+# Ingress / service exposure
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: agency.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - agency.example.com
+      secretName: agency-os-tls
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# DefSec defaults — tighten per-cluster policy.
+networkPolicy:
+  enabled: true
+
+autoscaling:
+  # NOTE: keep disabled for the SQLite profile (single-writer). Enable only
+  # with the PostgreSQL profile.
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

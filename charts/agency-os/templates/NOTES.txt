@@ -1,0 +1,23 @@
+{{- if .Values.controlPlane.existingSecret }}
+{{- else }}
+1. Get the generated admin bootstrap key (printed exactly once at boot).
+{{- if .Values.postgresql.enabled }}
+2. PostgreSQL is deployed in-cluster ({{ include "agency-os.fullname" . }}-postgresql:5432).
+{{- else }}
+2. SQLite profile: single control-plane replica (PVC-backed /app/data). Do NOT
+   enable autoscaling — SQLite is single-writer.
+{{- end }}
+3. Expose it:
+     kubectl port-forward svc/{{ include "agency-os.controlPlaneService" . }} 3000:{{ .Values.controlPlane.port }}
+   Dashboard:
+     kubectl port-forward svc/{{ include "agency-os.fullname" . }}-dashboard 8080:{{ .Values.dashboard.port }}
+{{- with .Values.ingress.enabled }}
+   Ingress configured at: {{ (index .Values.ingress.hosts 0).host }}
+{{- end }}
+
+Production checklist (see docs/KUBERNETES.md):
+  * Provision ADMIN_BOOTSTRAP_KEY + DATABASE_URL via External Secrets/Vault,
+    not the inline Secret.
+  * Keep SANDBOX_PROVIDER=process only inside the hardened container image.
+  * Reconcile networkPolicy with your CNI; allow model-provider egress.
+{{- end }}

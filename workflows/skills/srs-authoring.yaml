@@ -1,0 +1,49 @@
+name: srs-authoring
+version: 1.0.0
+description: >-
+  Author an SRS section from a PRD or user story: functional requirements,
+  non-functional requirements, assumptions, constraints, and traceability to
+  the originating story. Requirements are testable single-sentence statements.
+inputs:
+  type: object
+  required:
+    - storyId
+    - prdContext
+  properties:
+    storyId:
+      type: string
+      description: Identifier of the originating user story
+    prdContext:
+      type: string
+      description: PRD/story body the requirements must trace to
+outputs:
+  type: object
+  properties:
+    srsDocId:
+      type: string
+    requirementCount:
+      type: integer
+    traceabilityMap:
+      type: object
+preconditions:
+  - Originating story has passed Definition of Ready (see acceptance-criteria)
+  - Named, numbered requirement IDs are unique within the document
+procedure:
+  - Extract functional requirements as single verifiable statements
+  - Extract non-functional requirements (performance, security, accessibility, ops)
+  - List assumptions and constraints explicitly as such
+  - Map every requirement to its originating story or criterion
+  - Persist as kind=requirements knowledge doc
+verification: >-
+  Every requirement is a single sentence with a unique ID, an actor, and an
+  observable outcome. Coverage shows no story criterion left unallocated.
+failureHandling: >-
+  Ambiguous criterion blocks are returned to the product manager with the exact
+  ambiguity; requirements must never invent scope beyond the originating story.
+requiredTools:
+  - fs.workspace
+  - knowledge.write
+  - task.read
+requiredPermissions:
+  - knowledge:write
+  - task:read

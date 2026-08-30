@@ -1,0 +1,99 @@
+apiVersion: "apps/v1"
+kind: Deployment
+metadata:
+  name: {{ include "agency-os.controlPlaneService" . }}
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+    {{- include "agency-os.controlPlaneSelector" . | nindent 4 }}
+spec:
+  replicas: {{ if and .Values.autoscaling.enabled (not .Values.postgresql.enabled) }}0{{ else }}{{ .Values.replicaCount }}{{ end }}
+  selector:
+    matchLabels:
+      {{- include "agency-os.controlPlaneSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agency-os.controlPlaneSelector" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "agency-os.fullname" . }}
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1001
+        runAsNonRoot: true
+      {{- if not .Values.postgresql.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "agency-os.fullname" . }}-data
+        - name: tmp
+          emptyDir: {}
+      {{- else }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- end }}
+      containers:
+        - name: control-plane
+          image: "{{ .Values.image.controlPlane.repository }}:{{ .Values.image.controlPlane.tag }}"
+          imagePullPolicy: {{ .Values.image.controlPlane.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.controlPlane.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "agency-os.fullname" . }}-config
+            {{- if .Values.controlPlane.existingSecret }}
+            - secretRef:
+                name: {{ .Values.controlPlane.existingSecret }}
+            {{- else }}
+            - secretRef:
+                name: {{ include "agency-os.fullname" . }}
+            {{- end }}
+          {{- with .Values.controlPlane.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if not .Values.postgresql.enabled }}
+            - name: data
+              mountPath: /app/data
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}

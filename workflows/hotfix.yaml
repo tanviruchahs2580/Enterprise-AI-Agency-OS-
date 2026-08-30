@@ -1,0 +1,25 @@
+name: hotfix
+description: >-
+  Short, reversible remediation path for production defects. Compresses the
+  SDLC: reproduce first, minimal fix, two-axis review, security check, then a
+  reversible deploy with approval, followed by SLO monitoring.
+stages:
+  - name: reproduce
+    agentRole: support-agent
+    description: Reproduce the defect with evidence before any fix is attempted
+  - name: fix
+    agentRole: staff-engineer
+    retry:
+      maxAttempts: 3
+  - name: review
+    agentRole: code-reviewer
+    description: Two-axis review stays mandatory — hotfixes carry production risk
+  - name: security
+    agentRole: security-engineer
+  - name: deploy
+    agentRole: devops-engineer
+    approvalRequired: true
+    approvalAction: deploy:staging
+  - name: monitor
+    agentRole: sre
+    description: Confirm the remediation holds against the SLO after deploy

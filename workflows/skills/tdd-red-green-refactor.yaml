@@ -1,0 +1,50 @@
+name: tdd-red-green-refactor
+version: 1.0.0
+description: >-
+  Test-first implementation loop for a single module: write one failing test
+  (red), implement the minimal change to pass it (green), then refactor with
+  lint and typecheck green. One behavior per cycle.
+inputs:
+  type: object
+  required:
+    - moduleUnderTest
+    - acceptanceCriteria
+  properties:
+    moduleUnderTest:
+      type: string
+      description: Package or module path the change targets
+    acceptanceCriteria:
+      type: string
+      description: Criterion block the change must satisfy
+outputs:
+  type: object
+  properties:
+    testsAdded:
+      type: integer
+    coverageDeltaPct:
+      type: integer
+    refactorNotes:
+      type: string
+preconditions:
+  - Task is assigned to an ENGINEERING agent with clear acceptance criteria
+  - Agent holds fs.workspace access to the target module
+  - Test harness is runnable locally (unit test command known)
+procedure:
+  - Read acceptance criteria and pick the first observable behavior
+  - Write a focused test that fails for the intended reason; run it and confirm red
+  - Implement the minimal module change; run the test until green
+  - Refactor while keeping lint and typecheck clean; re-run the full suite
+  - Record testsAdded, coverageDeltaPct, and refactorNotes in the handoff
+verification: >-
+  Test suite passes, lint and typecheck clean, and coverage meets the owning
+  gate (see coverage-gate-80-60). The handoff records red→green evidence.
+failureHandling: >-
+  If a test cannot be turned green within 3 attempts, stop and hand off with the
+  failing trace. Never disable, skip, or delete a failing test.
+requiredTools:
+  - fs.workspace
+  - shell.write
+  - tests.unit
+requiredPermissions:
+  - workspace:write
+  - tests:run

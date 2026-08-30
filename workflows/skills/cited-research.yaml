@@ -1,0 +1,40 @@
+name: cited-research
+version: 1.0.0
+description: >-
+  Every factual claim carries source, date, and confidence. Research findings
+  are produced as source-cited knowledge documents; unverifiable claims are
+  marked as assumptions, never as facts.
+inputs:
+  type: object
+  required:
+    - question
+  properties:
+    question:
+      type: string
+      description: Research question to answer
+outputs:
+  type: object
+  properties:
+    findings:
+      type: array
+      items:
+        type: object
+    sourcesCount:
+      type: integer
+preconditions:
+  - Question is answerable with documented sources or is explicitly an assumption
+procedure:
+  - Split the question into sub-claims that can each be sourced
+  - For each claim record source, access date, and a confidence score
+  - Flag claims without a source as assumptions (kind=assumption)
+  - Persist as kind=research knowledge doc; include conflicting evidence
+verification: "Every fact claim lists source and date; confidence is one of high/medium/low."
+failureHandling: >-
+  Stale or inaccessible sources lower the confidence score instead of being
+  reused; conflicting sources are reported, not averaged away.
+requiredTools:
+  - web.fetch
+  - knowledge.write
+requiredPermissions:
+  - research:read
+  - knowledge:write

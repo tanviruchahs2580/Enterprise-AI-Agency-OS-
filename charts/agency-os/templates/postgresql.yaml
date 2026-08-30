@@ -1,0 +1,88 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agency-os.fullname" . }}-postgresql
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "agency-os.labels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  template:
+    metadata:
+      labels:
+        {{- include "agency-os.labels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      securityContext:
+        fsGroup: 999 # postgres alpine image UID
+        runAsNonRoot: true
+      containers:
+        - name: postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.database }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.user }}
+          envFrom:
+            - secretRef:
+                name: {{ include "agency-os.pgSecretRef" . }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.postgresql.user }}", "-d", "{{ .Values.postgresql.database }}"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "agency-os.fullname" . }}-postgresql
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agency-os.fullname" . }}-postgresql
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.postgresql.storageClass }}
+  storageClassName: {{ .Values.postgresql.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agency-os.fullname" . }}-postgresql
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  selector:
+    {{- include "agency-os.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+{{- end }}

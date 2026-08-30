@@ -1,0 +1,17 @@
+apiVersion: v2
+name: agency-os
+description: Enterprise AI Agency OS — control plane + dashboard (Kubernetes)
+type: application
+version: 0.10.0
+appVersion: "0.10.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - ai
+  - agency
+  - llm
+  - orchestration
+  - enterprise
+sources:
+  - https://github.com/anomalyco/opencode
+maintainers:
+  - name: Enterprise AI Agency OS maintainers

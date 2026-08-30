@@ -1,0 +1,50 @@
+name: acceptance-criteria
+version: 1.0.0
+description: >-
+  Turn a story into Given/When/Then acceptance criteria plus a Definition of
+  Ready checklist (edge cases, dependencies, testability, size). Used on task
+  creation and before implementation begins.
+inputs:
+  type: object
+  required:
+    - title
+    - description
+  properties:
+    title:
+      type: string
+      description: Task or story title
+    description:
+      type: string
+      description: Story body, details, and context
+outputs:
+  type: object
+  properties:
+    criteria:
+      type: array
+      items:
+        type: string
+    ready:
+      type: boolean
+    warnings:
+      type: array
+      items:
+        type: string
+preconditions:
+  - Story has a title and description (short or empty inputs produce warnings)
+procedure:
+  - Identify the actor and the behavior being requested
+  - Write Given/When/Then criteria covering happy path and key edge cases
+  - Run the Definition of Ready checks (testability, dependencies, size, ambiguity)
+  - Persist readiness warnings and criteria with the task
+verification: >-
+  Each criterion is testable without further interpretation; ready=true only
+  when no DoR warning remains. Edge cases are explicit, not implicit.
+failureHandling: >-
+  Untestable or contradictory criteria are flagged as warnings rather than
+  silently dropped; the creating agent may halt dispatch until resolved.
+requiredTools:
+  - task.read
+  - knowledge.write
+requiredPermissions:
+  - task:read
+  - knowledge:write

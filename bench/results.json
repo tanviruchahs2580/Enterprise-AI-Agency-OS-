@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-08-30T07:20:12.504Z",
+  "node": "v24.19.0",
+  "platform": "win32",
+  "results": [
+    {
+      "name": "config.loadConfig",
+      "iterations": 4000,
+      "medianMs": 0.0648,
+      "opsPerSec": 15
+    },
+    {
+      "name": "envelope.encrypt+decrypt",
+      "iterations": 30000,
+      "medianMs": 0.1425,
+      "opsPerSec": 7
+    },
+    {
+      "name": "workflow.start",
+      "iterations": 2000,
+      "medianMs": 0.0756,
+      "opsPerSec": 13
+    },
+    {
+      "name": "workflow.advance",
+      "iterations": 2000,
+      "medianMs": 0.1632,
+      "opsPerSec": 6
+    },
+    {
+      "name": "audit.append",
+      "iterations": 5000,
+      "medianMs": 0.1733,
+      "opsPerSec": 6
+    }
+  ]
+}

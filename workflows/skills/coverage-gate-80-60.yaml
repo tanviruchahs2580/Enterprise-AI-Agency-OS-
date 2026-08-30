@@ -1,0 +1,47 @@
+name: coverage-gate-80-60
+version: 1.0.0
+description: >-
+  Enforce the company coverage gate: statement coverage ≥80% for new code and
+  ≥60% for legacy modules under change. Ownership sits with the qa-engineer
+  contract; the check is deterministic output, not a model opinion.
+inputs:
+  type: object
+  required:
+    - moduleUnderTest
+    - coverageJsonPath
+  properties:
+    moduleUnderTest:
+      type: string
+      description: Module whose coverage report is being evaluated
+    coverageJsonPath:
+      type: string
+      description: Path to the lcov/json coverage report
+outputs:
+  type: object
+  properties:
+    passed:
+      type: boolean
+    statementPct:
+      type: number
+    threshold:
+      type: string
+    gapInstructions:
+      type: string
+preconditions:
+  - Coverage report exists and parses as valid JSON/XML
+  - Baseline (legacy vs new) is known for the module
+procedure:
+  - Parse the coverage report; compute statement coverage percentage
+  - "Apply the 80/60 rule: new modules >=80, legacy modules under change >=60"
+  - If below threshold, list the lowest-coverage functions to target next
+  - Persist a pass/fail decision record with the report values
+verification: "Decision is a deterministic function of the report: passed = (pct >= threshold)."
+failureHandling: >-
+  A missing or corrupt report fails the gate with a clear reason — missing data
+  is never treated as a pass.
+requiredTools:
+  - tests.unit
+  - fs.workspace
+requiredPermissions:
+  - tests:read
+  - workspace:read

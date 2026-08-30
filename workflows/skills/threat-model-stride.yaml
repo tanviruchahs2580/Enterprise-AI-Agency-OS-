@@ -1,0 +1,46 @@
+name: threat-model-stride
+version: 1.0.0
+description: >-
+  Produce a STRIDE threat model for a change boundary: identify assets, trust
+  boundaries, and threats per category, then rank and record mitigations as a
+  knowledge document consumed by security review.
+inputs:
+  type: object
+  required:
+    - changeBoundary
+  properties:
+    changeBoundary:
+      type: string
+      description: Components, data flows, and trust boundary being changed
+outputs:
+  type: object
+  properties:
+    threatDocId:
+      type: string
+    threatCount:
+      type: integer
+    topRisks:
+      type: array
+      items:
+        type: string
+preconditions:
+  - Architecture description of the change is available
+  - Agent holds security-engineer role or explicit REVIEW permission
+procedure:
+  - Enumerate assets, actors, and the trust boundary for the change
+  - Walk each STRIDE category (Spoofing, Tampering, Repudiation, Information-disclosure, Denial-of-service, Elevation-of-privilege)
+  - Rate each threat by likelihood × impact and rank the list
+  - Record mitigations per accepted threat; persist as kind=threat_model knowledge doc
+verification: >-
+  Every threat lists a mitigation or an explicit acceptance with owner. The
+  document references the affected components. Creator is a security role.
+failureHandling: >-
+  If the change boundary is ambiguous, request architecture clarification;
+  never model a boundary that is not described.
+requiredTools:
+  - fs.workspace
+  - knowledge.write
+  - web.fetch
+requiredPermissions:
+  - security:threat-model
+  - knowledge:write

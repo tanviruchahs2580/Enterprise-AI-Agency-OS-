@@ -1,0 +1,43 @@
+name: diataxis-map
+version: 1.0.0
+description: >-
+  Classify documentation into the four Diataxis quadrants — tutorials, how-to
+  guides, reference, explanation — and expose coverage gaps so every shipped
+  capability has at least one entry per applicable quadrant.
+inputs:
+  type: object
+  required:
+    - capabilities
+  properties:
+    capabilities:
+      type: array
+      items:
+        type: string
+      description: Capabilities shipped in the change under documentation
+outputs:
+  type: object
+  properties:
+    coverageMap:
+      type: object
+    gaps:
+      type: array
+      items:
+        type: string
+preconditions:
+  - Change is merged or tagged for release so its capabilities are final
+procedure:
+  - For each capability, classify existing docs into the four quadrants
+  - Flag missing quadrants as gaps (reference and how-to are the priority)
+  - Assign gap items to owning documentation work items
+  - Persist the coverage map as kind=documentation knowledge doc
+verification: "Every shipped capability is present in the coverage map with a non-empty quadrant set for its class."
+failureHandling: >-
+  Capability names that cannot be mapped to a shipped artifact are listed
+  separately; they are never silently dropped from the map.
+requiredTools:
+  - fs.workspace
+  - knowledge.write
+  - web.fetch
+requiredPermissions:
+  - knowledge:write
+  - docs:write

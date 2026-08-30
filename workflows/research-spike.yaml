@@ -1,0 +1,20 @@
+name: research-spike
+description: >-
+  Time-boxed research spike: decompose the question, cite sources, synthesize
+  options, and cost the recommendation before any implementation decision.
+stages:
+  - name: decompose
+    agentRole: captain
+    description: Break the spike into answerable sub-questions
+  - name: research
+    agentRole: research-agent
+    description: Cite primary sources with source/date/confidence per claim
+  - name: synthesize
+    agentRole: architect
+    description: Weigh options against the question and constraints
+  - name: cost
+    agentRole: finops-agent
+    description: Estimate budget impact of each recommended option
+  - name: handoff
+    agentRole: documentation-engineer
+    description: Persist findings and recommendation as knowledge documents

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agency-os.fullname" . }}-config
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+data:
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: "{{ .Values.controlPlane.port }}"
+  SANDBOX_PROVIDER: "{{ .Values.controlPlane.sandboxProvider }}"
+  DEFAULT_DAILY_BUDGET_USD: "{{ .Values.controlPlane.defaultDailyBudgetUsd }}"
+  {{- with .Values.controlPlane.modelProviderBaseUrl }}
+  MODEL_PROVIDER_BASE_URL: {{ . | quote }}
+  {{- end }}
+  {{- if eq .Values.controlPlane.secretBackend "vault" }}
+  SECRET_BACKEND: vault
+  {{- with .Values.controlPlane.vault.addr }}
+  VAULT_ADDR: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.controlPlane.vault.kvMount }}
+  VAULT_KV_MOUNT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.controlPlane.vault.pathPrefix }}
+  VAULT_PATH_PREFIX: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.controlPlane.vault.namespace }}
+  VAULT_NAMESPACE: {{ . | quote }}
+  {{- end }}
+  {{- else }}
+  SECRET_BACKEND: env
+  {{- end }}

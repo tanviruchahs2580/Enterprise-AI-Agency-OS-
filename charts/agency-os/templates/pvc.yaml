@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agency-os.fullname" . }}-data
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  {{- with .Values.controlPlane.sqliteStorageClass }}
+  storageClassName: {{ . }}
+  {{- end }}

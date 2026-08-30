@@ -6,6 +6,7 @@
     { "path": "packages/security" },
     { "path": "packages/models" },
     { "path": "packages/orchestration" },
+    { "path": "packages/skills" },
     { "path": "packages/integrations" },
     { "path": "packages/delivery" },
     { "path": "packages/scraper" },

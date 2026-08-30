@@ -38,6 +38,47 @@ on this repository). Do not open public issues for security bugs.
 - Configurable retention: delete knowledge/artifacts per policy (OPERATIONS.md).
 - GDPR erasure: soft-delete (`deleted_at`) + documented erasure runbook.
 
+## Data residency & processing locations
+
+- **Stateful services are non-exfiltrating by default**: the control plane keeps
+  all task/knowledge/budget/audit data in its own configured database and only
+  reaches the network for declared model providers and documented webhooks.
+- **Residency is deployment-defined, not platform-defined.** SQLite runs in-process;
+  PostgreSQL runs wherever you host it. Nothing is uploaded to this project's
+  infrastructure — there is no managed cloud endpoint in the data path.
+- Configured locations (see OPERATIONS.md, "regions"):
+  - primary DB region — set at deploy time (`DATABASE_URL`); record it in the
+    runbook for your environment
+  - model-provider region — depends on the upstream MODEL_PROVIDER_BASE_URL;
+    document it if you must guarantee residency
+- Customers/tenants are partitioned by organization; cross-org reads are blocked
+  server-side and covered by e2e tests. Ambition: per-workspace encryption keys
+  (ROADMAP v0.12).
+
+## Encryption
+
+- **At rest**: platform tables that hold secrets store hashes only (API keys as
+  SHA-256, session tokens hashed). Full-disk encryption for the data store is
+  the deployment operator's obligation; enable it on the volume backing
+  `DATABASE_URL` (LUKS/encrypted EBS/encrypted disk on VMs) and record this in
+  the deployment runbook.
+- **In transit**: HTTPS required in production (`NODE_ENV=production` refuses
+  non-TLS CORS origins and non-Secure cookie issuance gate exists via
+  `SESSION_COOKIE_SECURE`); all outbound provider calls flow over TLS.
+- **Key handling**: single admin bootstrap key is env-only, never logged in full,
+  refused unless explicitly supplied in production. Session cookies are httpOnly
+  + SameSite=Strict; the raw key is never persisted in browser storage.
+
+## Compliance posture
+
+- GDPR / CCPA-style records, erasure and breach timelines:
+  - `docs/compliance/RECORDS-OF-PROCESSING.md` — categories, purposes, retention
+  - `docs/compliance/DPA-TEMPLATE.md` — data-processing agreement for tenants
+  - `docs/compliance/BREACH-NOTIFICATION-SLA.md` — breach SLA + notification template
+- **Current status: self-assessment.** Independent SOC 2 / pentest is not yet
+  scheduled (audit Phase 4); do not advertise certifications you do not hold.
+  The audit control matrix that produced these docs is the source of truth.
+
 ## Secure defaults
 
 - `NODE_ENV=production` refuses: missing admin key, SQLite database, wildcard CORS,

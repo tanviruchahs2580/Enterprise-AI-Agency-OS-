@@ -1,0 +1,87 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agency-os.fullname" . }}-dashboard
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agency-os.dashboardSelector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {} # any ingress-controller/proxy namespace
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dashboard.port }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agency-os.controlPlaneSelector" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.port }}
+    - ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agency-os.fullname" . }}-control-plane
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agency-os.controlPlaneSelector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agency-os.dashboardSelector" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.port }}
+    {{- if .Values.postgresql.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agency-os.labels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.port }}
+    {{- end }}
+    - from:
+        - namespaceSelector: {} # ingress/proxy traffic
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.port }}
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agency-os.labels" . | nindent 14 }}
+              app.kubernetes.io/component: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- end }}
+    {{- with .Values.controlPlane.egressAllow }}
+    - to:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}

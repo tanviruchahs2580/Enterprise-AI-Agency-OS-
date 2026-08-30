@@ -1,0 +1,14 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+# NOTE: for the SQLite profile (single-writer) keep minAvailable: 1.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "agency-os.fullname" . }}-control-plane
+  labels:
+    {{- include "agency-os.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "agency-os.controlPlaneSelector" . | nindent 6 }}
+{{- end }}
