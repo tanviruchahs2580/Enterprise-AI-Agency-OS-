@@ -20,11 +20,34 @@ export class AgentRegistry {
     let n = 0;
     this.db.transaction(() => {
       for (const a of AGENT_ROSTER) {
-        const exists = this.db.get("SELECT id FROM agents WHERE org_id = ? AND name = ?", [
-          orgId,
-          a.name,
-        ]);
-        if (exists) continue;
+        const exists = this.db.get<{ id: string }>(
+          "SELECT id FROM agents WHERE org_id = ? AND name = ?",
+          [orgId, a.name]
+        );
+        if (exists) {
+          // Roster sync: the seed is the source of truth for contract fields,
+          // so risk-weighted budgets and skill assignments reach existing orgs
+          // on re-seed. Status/heartbeat/auth state is never touched.
+          this.db.driver.run(
+            `UPDATE agents SET role = ?, description = ?, allowed_tools = ?, forbidden_tools = ?,
+             model_policy = ?, max_iterations = ?, timeout_ms = ?, budget_usd = ?, skills = ?, updated_at = ?
+             WHERE id = ?`,
+            [
+              a.role,
+              a.description,
+              JSON.stringify(a.allowedTools),
+              JSON.stringify(a.forbiddenTools),
+              JSON.stringify({ tier: a.modelTier }),
+              a.maxIterations,
+              a.timeoutMs,
+              a.budgetUsd,
+              JSON.stringify(a.skills ?? []),
+              now,
+              exists.id,
+            ]
+          );
+          continue;
+        }
         this.db.insert("agents", {
           id: newId("agt"),
           org_id: orgId,
@@ -38,6 +61,7 @@ export class AgentRegistry {
           max_iterations: a.maxIterations,
           timeout_ms: a.timeoutMs,
           budget_usd: a.budgetUsd,
+          skills: JSON.stringify(a.skills ?? []),
           status: "idle",
           created_at: now,
           updated_at: now,
@@ -50,7 +74,7 @@ export class AgentRegistry {
 
   list(orgId: string): Row[] {
     return this.db.all(
-      "SELECT id, name, role, description, status, model_policy, max_iterations, timeout_ms, budget_usd, allowed_tools, forbidden_tools, heartbeat_at FROM agents WHERE org_id = ? ORDER BY name",
+      "SELECT id, name, role, description, status, model_policy, max_iterations, timeout_ms, budget_usd, allowed_tools, forbidden_tools, skills, heartbeat_at FROM agents WHERE org_id = ? ORDER BY name",
       [orgId]
     );
   }
@@ -92,6 +116,7 @@ export class AgentRegistry {
     budgetUsd: number;
     maxIterations: number;
     timeoutMs: number;
+    skills: string[];
   } {
     const mp = safeJson(String(row.model_policy ?? "{}")) as { tier?: string };
     return {
@@ -101,6 +126,7 @@ export class AgentRegistry {
       budgetUsd: Number(row.budget_usd ?? 5),
       maxIterations: Number(row.max_iterations ?? 25),
       timeoutMs: Number(row.timeout_ms ?? 600_000),
+      skills: safeJson(String(row.skills ?? "[]")) as string[],
     };
   }
 }

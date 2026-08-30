@@ -21,10 +21,30 @@ export interface AgentDefinition {
   maxIterations: number;
   timeoutMs: number;
   budgetUsd: number;
+  /** Skills (SKILLS.md) this agent may invoke; resolved by name via the skill registry. */
+  skills: string[];
   verificationPolicy: string;
 }
 
 const READ_TOOLS: ToolId[] = ["shell.read", "fs.workspace", "knowledge.write", "web.fetch"];
+
+/**
+ * Risk-weighted budgets (audit Phase 2.4): REASONING/SECURITY/REVIEW agents get
+ * deeper headroom for high-stakes analysis; STANDARD work is mid-band; FAST
+ * read-mostly roles are the cheapest. Explicit per-agent overrides still win.
+ */
+function tierBudget(tier: ModelTier): number {
+  switch (tier) {
+    case "REASONING":
+    case "SECURITY":
+    case "REVIEW":
+      return 8;
+    case "STANDARD":
+      return 6;
+    default:
+      return 4; // FAST, VISION, LOCAL
+  }
+}
 
 function def(
   name: string,
@@ -33,7 +53,7 @@ function def(
   modelTier: ModelTier,
   tools: { allowed: ToolId[]; forbidden: ToolId[] },
   verificationPolicy: string,
-  opts?: Partial<Pick<AgentDefinition, "maxIterations" | "timeoutMs" | "budgetUsd">>
+  opts?: Partial<Pick<AgentDefinition, "maxIterations" | "timeoutMs" | "budgetUsd" | "skills">>
 ): AgentDefinition {
   return {
     name,
@@ -49,7 +69,8 @@ function def(
     modelTier,
     maxIterations: opts?.maxIterations ?? 25,
     timeoutMs: opts?.timeoutMs ?? 600_000,
-    budgetUsd: opts?.budgetUsd ?? 5,
+    budgetUsd: opts?.budgetUsd ?? tierBudget(modelTier),
+    skills: opts?.skills ?? [],
     verificationPolicy,
   };
 }
@@ -69,22 +90,37 @@ export const AGENT_ROSTER: AgentDefinition[] = [
     { maxIterations: 40, timeoutMs: 900_000 }),
   def("product-manager", "PRODUCT", "Turns intent into PRDs, user stories and acceptance criteria.", "STANDARD",
     { allowed: [...READ_TOOLS, "docs-write"], forbidden: ["shell.write", "deploy.production", "secrets.read"] },
-    "Requirements traceable to tests."),
+    "Requirements traceable to tests.",
+    { skills: ["srs-authoring", "acceptance-criteria"] }),
   def("requirements-engineer", "PRODUCT", "Runs discovery interviews, produces SRS and edge cases.", "STANDARD",
     { allowed: [...READ_TOOLS, "docs-write"], forbidden: ["shell.write", "deploy.production"] },
-    "SRS reviewed by product-manager before Ready gate."),
+    "SRS reviewed by product-manager before Ready gate.",
+    { skills: ["srs-authoring", "acceptance-criteria"] }),
   def("architect", "ARCHITECTURE", "Designs systems, C4 diagrams, ADRs and threat models.", "REASONING",
     { allowed: [...READ_TOOLS, "docs-write", "diagrams"], forbidden: ["shell.write", "deploy.production"] },
-    "Architecture review by tech-lead required (Plan-lock)."),
+    "Architecture review by tech-lead required (Plan-lock).",
+    { skills: ["adr-writing", "threat-model-stride"] }),
   def("staff-engineer", "ENGINEERING", "Deep module design, cross-cutting refactors, mentoring reviews.", "REASONING",
     { allowed: [...READ_TOOLS, "git.branch", "git.commit", "tests.run"], forbidden: ["deploy.production", "secrets.rotate"] },
-    "Two-axis code review pass + tests green."),
+    "Two-axis code review pass + tests green.",
+    { skills: ["tdd-red-green-refactor"] }),
   def("frontend-engineer", "ENGINEERING", "Builds accessible, responsive UIs with real states.", "STANDARD",
     { allowed: [...READ_TOOLS, "git.branch", "git.commit", "tests.run", "tests.e2e"], forbidden: ["deploy.production", "secrets.read"] },
-    "E2E + visual check on every UI task."),
+    "E2E + visual check on every UI task.",
+    { skills: ["tdd-red-green-refactor"] }),
   def("backend-engineer", "ENGINEERING", "Implements APIs, services and data models with TDD.", "STANDARD",
     { allowed: [...READ_TOOLS, "git.branch", "git.commit", "tests.run", "db.query"], forbidden: ["deploy.production", "db.migrate"] },
-    "Unit+integration green; migration reviewed by database-engineer."),
+    "Unit+integration green; migration reviewed by database-engineer.",
+    { skills: ["tdd-red-green-refactor"] }),
+  def("localization-engineer", "ENGINEERING", "Internationalizes UIs: externalized strings, locale bundles, RTL/LTR, pluralization.", "STANDARD",
+    { allowed: [...READ_TOOLS, "git.branch", "git.commit", "tests.run", "docs-write"], forbidden: ["deploy.production", "secrets.read"] },
+    "No user-facing hardcoded strings; locale bundles validated and e2e-tested."),
+  def("ux-designer", "PRODUCT", "Interaction and visual design: flows, states, accessibility, content hierarchy.", "STANDARD",
+    { allowed: [...READ_TOOLS, "docs-write", "diagrams"], forbidden: ["shell.write", "deploy.production"] },
+    "WCAG AA contrast + keyboard-path verified; design checklist recorded."),
+  def("data-analytics-engineer", "DATA", "Reporting and analytics: models, queries, metrics definitions, dashboards.", "STANDARD",
+    { allowed: [...READ_TOOLS, "db.query", "docs-write", "tests.run"], forbidden: ["deploy.production", "db.migrate"] },
+    "Every metric query validated against schema; results reproducible."),
   def("database-engineer", "DATA", "Schema design, migrations, query performance.", "STANDARD",
     { allowed: [...READ_TOOLS, "git.branch", "git.commit", "tests.run", "db.migrate"], forbidden: ["deploy.production"] },
     "Reversible migrations; never destructive without approval gate."),
@@ -96,10 +132,12 @@ export const AGENT_ROSTER: AgentDefinition[] = [
     "Runbook exists for every alert."),
   def("qa-engineer", "QUALITY", "Test strategy, automation, exploratory testing.", "STANDARD",
     { allowed: [...READ_TOOLS, "git.branch", "tests.run", "tests.e2e", "browser.session"], forbidden: ["deploy.production", "secrets.read"] },
-    "Coverage ≥80% line / ≥60% branch on touched code."),
+    "Coverage ≥80% line / ≥60% branch on touched code.",
+    { skills: ["coverage-gate-80-60", "acceptance-criteria"] }),
   def("security-engineer", "SECURITY", "Threat modeling, SAST/DAST triage, secure defaults.", "SECURITY",
     { allowed: [...READ_TOOLS, "security-scan"], forbidden: ["deploy.production", "secrets.rotate"] },
-    "No critical/high findings open at merge."),
+    "No critical/high findings open at merge.",
+    { skills: ["threat-model-stride"] }),
   def("performance-engineer", "QUALITY", "Benchmarks, load tests, profiling.", "STANDARD",
     { allowed: [...READ_TOOLS, "tests.run", "load-test"], forbidden: ["shell.write", "deploy.production"] },
     "Baseline recorded before/after optimization."),
@@ -108,7 +146,8 @@ export const AGENT_ROSTER: AgentDefinition[] = [
     "Release notes + rollback instructions mandatory."),
   def("documentation-engineer", "DOCS", "Diataxis docs, API references, runbooks.", "FAST",
     { allowed: [...READ_TOOLS, "docs-write"], forbidden: ["shell.write", "deploy.production"] },
-    "Docs build passes; coverage map updated."),
+    "Docs build passes; coverage map updated.",
+    { skills: ["diataxis-map"] }),
   def("code-reviewer", "REVIEW", "Standards-axis review: smells, design, tests quality.", "REVIEW",
     { allowed: [...READ_TOOLS], forbidden: ["shell.write", "deploy.production", "git.commit"] },
     "Findings classified blocking/non-blocking."),
@@ -117,7 +156,8 @@ export const AGENT_ROSTER: AgentDefinition[] = [
     "Attack cases documented and tested."),
   def("research-agent", "RESEARCH", "Cited research from primary sources.", "FAST",
     { allowed: ["web.fetch", "knowledge.write"], forbidden: ["shell.write", "git.commit", "deploy.production"] },
-    "Every claim has source, date, confidence."),
+    "Every claim has source, date, confidence.",
+    { skills: ["cited-research"] }),
   def("support-agent", "SUPPORT", "Triages inbound issues, reproduces bugs.", "FAST",
     { allowed: [...READ_TOOLS], forbidden: ["shell.write", "git.commit", "deploy.production", "secrets.read"] },
     "Reproduction steps verified before escalation."),

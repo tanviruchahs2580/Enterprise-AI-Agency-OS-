@@ -1,4 +1,4 @@
-import { newId, AppError } from "@agency/core";
+import { newId, AppError, PASSTHROUGH_CODEC, type FieldCodec } from "@agency/core";
 import type { Db } from "@agency/db";
 import { parse } from "yaml";
 
@@ -10,6 +10,15 @@ export interface WorkflowStageDef {
   approvalAction?: string;
   retry?: { maxAttempts: number };
   timeoutMs?: number;
+  /** Audit Phase 2.2: skipped automatically for low-risk runs. */
+  lowRiskSkip?: boolean;
+  /**
+   * Audit Phase 3.2: parallel fan-out. When set, this stage fans out into the
+   * listed sub-stages, executed concurrently. The run converges (advances to
+   * the next stage) only after every branch completes; per-branch outputs are
+   * checkpointed under `state[stageName][branchName]`.
+   */
+  fanOut?: WorkflowStageDef[];
 }
 
 export interface WorkflowDefinition {
@@ -17,6 +26,8 @@ export interface WorkflowDefinition {
   description?: string;
   stages: WorkflowStageDef[];
 }
+
+export type RiskTier = "low" | "medium" | "high";
 
 /** Stage executor supplied by the application layer. */
 export type StageHandler = (
@@ -52,9 +63,14 @@ const DEFAULT_WORKFLOW: WorkflowDefinition = {
 export class WorkflowEngine {
   private handlers = new Map<string, Map<string, StageHandler>>();
   private db: Db;
+  private codecFor: (orgId: string) => FieldCodec;
 
-  constructor(db: Db) {
+  constructor(
+    db: Db,
+    opts?: { codecFor?: (orgId: string) => FieldCodec }
+  ) {
     this.db = db;
+    this.codecFor = opts?.codecFor ?? (() => PASSTHROUGH_CODEC);
   }
 
   registerHandler(workflowName: string, stage: string, handler: StageHandler): void {
@@ -81,9 +97,16 @@ export class WorkflowEngine {
 
   start(
     orgId: string,
-    opts: { definition?: WorkflowDefinition; projectId?: string; initialState?: Record<string, unknown>; correlationId?: string }
+    opts: {
+      definition?: WorkflowDefinition;
+      projectId?: string;
+      initialState?: Record<string, unknown>;
+      correlationId?: string;
+      riskTier?: RiskTier;
+    }
   ): { runId: string; workflow: string; currentStage: string } {
     const defn = opts.definition ?? DEFAULT_WORKFLOW;
+    const riskTier = opts.riskTier ?? "medium"; // conservative default
     const runId = newId("wfr");
     const now = this.db.now();
     this.db.insert("workflow_runs", {
@@ -93,11 +116,14 @@ export class WorkflowEngine {
       workflow_name: defn.name,
       current_stage: defn.stages[0]!.name,
       status: "running",
-      state_json: JSON.stringify({
-        definition: defn,
-        completedStages: [],
-        ...opts.initialState,
-      }),
+      state_json: this.codecFor(orgId).encrypt(
+        JSON.stringify({
+          definition: defn,
+          riskTier,
+          completedStages: [],
+          ...opts.initialState,
+        })
+      ),
       correlation_id: opts.correlationId ?? newId("cor"),
       created_at: now,
       updated_at: now,
@@ -119,16 +145,42 @@ export class WorkflowEngine {
       throw new AppError("CONFLICT", `run is ${row.status}; only running runs can advance`);
     }
 
-    const state = JSON.parse(row.state_json) as {
+    const codec = this.codecFor(row.org_id);
+    const state = JSON.parse(codec.decrypt(row.state_json)) as {
       definition: WorkflowDefinition;
       completedStages: string[];
+      riskTier?: RiskTier;
     } & Record<string, unknown>;
     const stages = state.definition.stages;
+    const riskTier: RiskTier = state.riskTier ?? "medium";
 
     // find index of current stage
-    const idx = stages.findIndex((s) => s.name === row.current_stage);
+    let idx = stages.findIndex((s) => s.name === row.current_stage);
     if (idx === -1) throw new AppError("INTERNAL", `unknown stage ${row.current_stage}`);
+
+    // Audit Phase 2.2 — risk-tier pruning: low-risk runs advance through
+    // stages flagged lowRiskSkip without executing them, checkpointing each skip
+    // so the run state stays consistent and resumable.
+    while (idx < stages.length && riskTier === "low" && stages[idx]!.lowRiskSkip === true) {
+      state.completedStages.push(stages[idx]!.name);
+      idx++;
+      if (idx >= stages.length) {
+        this.db.transaction(() => {
+          this.persistState(runId, state, "__done__", codec);
+          this.setStatus(runId, "succeeded");
+        });
+        return { status: "succeeded", currentStage: null };
+      }
+      this.persistState(runId, state, stages[idx]!.name, codec);
+    }
+
     const stage = stages[idx]!;
+
+    // Audit Phase 3.2 — parallel fan-out: branch handlers run concurrently and
+    // the run only converges when every branch has completed.
+    if (stage.fanOut && stage.fanOut.length > 0) {
+      return this.advanceFanOut(runId, state, stages, idx, stage, codec);
+    }
 
     const handler = this.handlers.get(state.definition.name)?.get(stage.name);
     if (!handler) {
@@ -150,14 +202,65 @@ export class WorkflowEngine {
     const nextIdx = idx + 1;
     if (nextIdx >= stages.length) {
       this.db.transaction(() => {
-        this.persistState(runId, state, "__done__");
+        this.persistState(runId, state, "__done__", codec);
         this.setStatus(runId, "succeeded");
       });
       return { status: "succeeded", currentStage: null };
     }
 
     const next = stages[nextIdx]!;
-    this.persistState(runId, state, next.name);
+    this.persistState(runId, state, next.name, codec);
+    return { status: "running", currentStage: next.name };
+  }
+
+  /**
+   * Runs the fan-out branches of `stage` concurrently (Promise.all) and merges
+   * the outputs under `state[stage.name][branch.name]`. A branch failure marks
+   * the whole run failed — partial branch work is never checkpointed as
+   * converged because the run only persists state after all branches resolve.
+   */
+  private async advanceFanOut(
+    runId: string,
+    state: { definition: WorkflowDefinition; completedStages: string[]; riskTier?: RiskTier } & Record<string, unknown>,
+    stages: WorkflowStageDef[],
+    idx: number,
+    stage: WorkflowStageDef,
+    codec: FieldCodec
+  ): Promise<{ status: string; currentStage: string | null }> {
+    const workflowName = state.definition.name;
+    try {
+      const branches = await Promise.all(
+        (stage.fanOut ?? []).map(async (branch) => {
+          const h = this.handlers.get(workflowName)?.get(branch.name);
+          if (!h) {
+            throw new AppError("DEPENDENCY_UNAVAILABLE", `no handler registered for fan-out branch '${branch.name}'`);
+          }
+          try {
+            const output = await h(branch.name, { ...state, $branch: branch.name, $fanOut: stage.name });
+            return { branch: branch.name, output };
+          } catch (e) {
+            throw new AppError("INTERNAL", `branch '${branch.name}' (fan-out '${stage.name}') failed`, { cause: e });
+          }
+        })
+      );
+      state[stage.name] = Object.fromEntries(branches.map((b) => [b.branch, b.output]));
+      for (const b of branches) state.completedStages.push(b.branch);
+      state.completedStages.push(stage.name);
+    } catch (e) {
+      this.setStatus(runId, "failed");
+      throw e instanceof AppError ? e : new AppError("INTERNAL", `fan-out '${stage.name}' failed`, { cause: e });
+    }
+
+    const nextIdx = idx + 1;
+    if (nextIdx >= stages.length) {
+      this.db.transaction(() => {
+        this.persistState(runId, state, "__done__", codec);
+        this.setStatus(runId, "succeeded");
+      });
+      return { status: "succeeded", currentStage: null };
+    }
+    const next = stages[nextIdx]!;
+    this.persistState(runId, state, next.name, codec);
     return { status: "running", currentStage: next.name };
   }
 
@@ -165,8 +268,9 @@ export class WorkflowEngine {
     const row = this.getRunRow(runId);
     const state = JSON.parse(row.state_json) as Record<string, unknown>;
     state.pendingApproval = { action, ...resourceRef };
+    const codec = this.codecFor(row.org_id);
     this.db.transaction(() => {
-      this.persistState(runId, state);
+      this.persistState(runId, state, undefined, codec);
       this.setStatus(runId, "waiting_approval");
     });
   }
@@ -183,25 +287,38 @@ export class WorkflowEngine {
   getState(orgId: string, runId: string): Row {
     const row = this.db.get("SELECT * FROM workflow_runs WHERE id = ? AND org_id = ?", [runId, orgId]);
     if (!row) throw new AppError("NOT_FOUND", "workflow run not found");
-    return row;
+    // Decrypt state before handing it to callers — ciphertext never leaves the engine.
+    return { ...row, state_json: this.codecFor(orgId).decrypt(String(row.state_json)) };
   }
 
   private getRunRow(runId: string): {
     id: string;
+    org_id: string;
     status: string;
     current_stage: string;
     state_json: string;
   } {
-    const row = this.db.get("SELECT id, status, current_stage, state_json FROM workflow_runs WHERE id = ?", [
-      runId,
-    ]) as { id: string; status: string; current_stage: string; state_json: string } | undefined;
+    const row = this.db.get(
+      "SELECT id, org_id, status, current_stage, state_json FROM workflow_runs WHERE id = ?",
+      [runId]
+    ) as
+      | { id: string; org_id: string; status: string; current_stage: string; state_json: string }
+      | undefined;
     if (!row) throw new AppError("NOT_FOUND", `workflow run ${runId} not found`);
-    return row;
+    return {
+      ...row,
+      state_json: this.codecFor(row.org_id).decrypt(row.state_json),
+    };
   }
 
-  private persistState(runId: string, state: unknown, currentStageOverride?: string): void {
+  private persistState(
+    runId: string,
+    state: unknown,
+    currentStageOverride: string | undefined,
+    codec: FieldCodec
+  ): void {
     const patch: Record<string, unknown> = {
-      state_json: JSON.stringify(state),
+      state_json: codec.encrypt(JSON.stringify(state)),
       updated_at: this.db.now(),
     };
     if (currentStageOverride) patch.current_stage = currentStageOverride;

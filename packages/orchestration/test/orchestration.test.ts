@@ -130,10 +130,10 @@ test("agent roster seeds once; registry heartbeats", () => {
   const reg = new AgentRegistry(db);
   const first = reg.seedRoster(orgId);
   const second = reg.seedRoster(orgId);
-  assert.equal(first, 21);
+  assert.equal(first, 24);
   assert.equal(second, 0);
   const list = reg.list(orgId);
-  assert.equal(list.length, 21);
+  assert.equal(list.length, 24);
   const captain = list.find((a) => a.name === "captain")!;
   reg.heartbeat(orgId, String(captain.id));
   reg.setStatus(orgId, String(captain.id), "busy");
