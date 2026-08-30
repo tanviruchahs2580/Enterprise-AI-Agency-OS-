@@ -66,12 +66,62 @@ export const configSchema = z.object({
   /** PHASE B4: specialist agent handlers (pm/architect/sre) — default off. */
   FEATURE_AGENT_SPECIALISTS: Bool(false),
   // ---- enterprise hardening (Phase 0) ----
-  /** Secret resolution backend: 'env' (default) | 'mock' (tests) | future vault/aws-sm/doppler */
-  SECRET_BACKEND: z.enum(["env", "mock"]).default("env"),
+  /** Secret resolution backend: 'env' (default) | 'mock' (tests) | 'vault' (HashiCorp Vault KV v2) */
+  SECRET_BACKEND: z.enum(["env", "mock", "vault"]).default("env"),
   /** When true, production refuses sensitive keys resolved from plain process env. */
   STRICT_SECRET_BACKEND: Bool(false),
+  // ---- HashiCorp Vault backend (T-D: secret resolution adapter) ----
+  /** Vault server root URL, e.g. https://vault.example.com. */
+  VAULT_ADDR: z.string().url().optional(),
+  /** Static Vault token (alternative to AppRole). */
+  VAULT_TOKEN: z.string().optional(),
+  /** AppRole role_id (alternative to a static token). */
+  VAULT_ROLE_ID: z.string().optional(),
+  /** AppRole secret_id (alternative to a static token). */
+  VAULT_SECRET_ID: z.string().optional(),
+  /** KV version-2 secrets mount (default "secret"). */
+  VAULT_KV_MOUNT: z.string().default("secret"),
+  /** Optional path prefix beneath the mount, e.g. "agencyos/prod". */
+  VAULT_PATH_PREFIX: z.string().optional(),
+  /** Optional Vault Enterprise namespace header. */
+  VAULT_NAMESPACE: z.string().optional(),
   /** Slow-query logging threshold in ms (0 = off). */
   SLOW_QUERY_LOG_MS: NonNegInt(0),
+  // ---- auth sessions (audit Phase 1.2: httpOnly cookie) ----
+  /** Name of the httpOnly session cookie issued by POST /api/v1/auth/session. */
+  SESSION_COOKIE_NAME: z.string().default("agencyos_session"),
+  /** Session lifetime in ms (default 24h). */
+  SESSION_TTL_MS: Int(86_400_000),
+  /** Force the Secure flag even outside production (e.g. TLS-terminated staging). */
+  SESSION_COOKIE_SECURE: Bool(false),
+  // ---- OIDC/SSO (audit Phase 2: ADR-0007 IdentityProvider seam) ----
+  /** Enable the OIDC Authorization Code + PKCE flow (login + callback routes). */
+  OIDC_ENABLED: Bool(false),
+  /** Issuer URL; the /.well-known/openid-configuration document is discovered from it. */
+  OIDC_ISSUER: z.string().url().optional(),
+  OIDC_CLIENT_ID: z.string().optional(),
+  OIDC_CLIENT_SECRET: z.string().optional(),
+  /**
+   * Full callback URL registered with the IdP. When absent it is derived from
+   * the request Host (useful behind a proxy on the same origin as the API).
+   */
+  OIDC_REDIRECT_URI: z.string().url().optional(),
+  /** JWT claim (string or array of strings) that carries the target role. */
+  OIDC_ROLE_CLAIM: z.string().default("roles"),
+  /** JWT claim that carries the target org id; falls back to the default org. */
+  OIDC_ORG_CLAIM: z.string().default("org"),
+  // ---- at-rest / per-workspace encryption (audit Phases 3-4) ----
+  /** Master key (base64, 32 bytes) for envelope encryption. Absent = encryption disabled. */
+  ENCRYPTION_MASTER_KEY: z.string().optional(),
+  /** Encrypt sensitive payload fields at rest when a master key is configured. */
+  ENCRYPT_AT_REST: Bool(false),
+  // ---- OpenTelemetry tracing (T-F) ----
+  /** Enable OTLP exporting; requires one of the OTEL_EXPORTER_OTLP_*_ENDPOINT vars. */
+  OTEL_ENABLED: Bool(false),
+  /** Collector base URL (OTLP/HTTP), e.g. http://otel-collector:4318. */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+  /** Full traces endpoint override, e.g. http://collector:4318/v1/traces. */
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
@@ -134,6 +184,29 @@ export function loadConfig(
         ]);
       }
     }
+  }
+
+  // Secret-backend preconditions apply in every environment — opting into the
+  // vault backend is explicit, so fail fast even in dev rather than silently
+  // resolving nothing at request time.
+  if (cfg.SECRET_BACKEND === "vault" && !cfg.VAULT_ADDR) {
+    throw new ConfigValidationError(["SECRET_BACKEND=vault requires VAULT_ADDR"]);
+  }
+  if (
+    cfg.SECRET_BACKEND === "vault" &&
+    !cfg.VAULT_TOKEN &&
+    !(cfg.VAULT_ROLE_ID && cfg.VAULT_SECRET_ID)
+  ) {
+    throw new ConfigValidationError([
+      "SECRET_BACKEND=vault requires VAULT_TOKEN or VAULT_ROLE_ID+VAULT_SECRET_ID",
+    ]);
+  }
+
+  // At-rest encryption is opt-in and must never silently degrade to plaintext.
+  if (cfg.ENCRYPT_AT_REST && !cfg.ENCRYPTION_MASTER_KEY) {
+    throw new ConfigValidationError([
+      "ENCRYPT_AT_REST=true requires ENCRYPTION_MASTER_KEY (base64 32-byte key)",
+    ]);
   }
 
   return cfg;
