@@ -1,6 +1,6 @@
 {
   "name": "enterprise-ai-agency-os",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "description": "Enterprise-grade, self-hostable AI Software Agency Operating System: control plane, orchestrator, model router, sandboxed agents, governance and observability.",
   "license": "Apache-2.0",
@@ -16,6 +16,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b tsconfig.json && tsc -p apps/dashboard --noEmit",
     "test": "node --test \"packages/**/test/*.test.ts\" \"apps/control-plane/test/*.test.ts\"",
+    "test:mutation": "stryker run",
+    "bench": "node bench/benchmarks.mjs",
     "build": "npm run build --workspaces --if-present",
     "dev": "node scripts/dev.mjs",
     "self-test": "node scripts/self-test.mjs",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@stryker-mutator/core": "^10.0.0",
     "@types/node": "^24.3.0",
     "eslint": "^9.33.0",
     "playwright": "^1.62.1",

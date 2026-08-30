@@ -2,6 +2,54 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.11.0] — 2026-08-30
+
+### Added — enterprise readiness batch (audit phases 1–4, T-A…T-N)
+- **At-rest encryption & per-workspace org keys (T-H/T-L)**: envelope crypto
+  primitives (`FieldCodec`, `enc:v1:` ciphertext), `OrgKeyEncryption` —
+  per-org DEKs wrapped by a KEK in `org_data_keys`, in-memory cache,
+  codec injected into `WorkflowEngine` (default passthrough keeps existing
+  deployments byte-for-byte unchanged). Opt-in via `ENCRYPT_AT_REST` +
+  `ENCRYPTION_MASTER_KEY` (base64 32-byte); config fails fast if the flag is
+  set without a key. Cross-org crypto isolation e2e.
+- **OIDC/SSO login (T-A)**: `/api/v1/auth` IdP-initiated flow with JWKS
+  verification, role/org claim mapping, session cookies; feature-flagged
+  (`FEATURE_OIDC`), tested against an inline mock test IdP.
+- **Multi-agent fan-out (T-B)**: parallel sub-executions per stage, fan-in
+  barrier, per-branch failures surfaced without clobbering other branches.
+- **Org-level skill overrides (T-I)**: `PUT/DELETE /api/v1/skills/overrides/:name`
+  (`agent:manage`) with fail-loud read-time validation; `GET /api/v1/skills`
+  now returns effective per-org skills + `orgOverrides`.
+- **Skill feedback loop (T-J)**: record verified executions
+  (`/api/v1/skills/executions`, `execution:control`), per-skill/outcome
+  aggregates (`/stats`) incl. success-duration medians and cost.
+- **Agent-to-agent protocol (T-K)**: A2A TaskCard v0.1 cards, status
+  transitions + ack tokens (inbound/outbound), org-scoped, gated by
+  `FEATURE_A2A` (default off → 404).
+- **Vault/KMS secret resolver (T-D)**: `SECRET_BACKEND=vault` support for
+  HashiCorp Vault KV v2 with login/prime; OTel tracing (T-F,
+  `OTEL_EXPORTER_OTLP_*`), Helm chart + K8s runbook (T-E), SOC2 readiness
+  doc (T-C), strategy & scope doc (T-N), benchmarks scaffold (`npm run bench`,
+  T-M).
+- **CI/PR hygiene**: PR template, Dependabot config, scoped GitHub workflows.
+
+### Changed
+- `npm test` now 183 tests (was 168); mutation score raised to **65.1%**
+  (Stryker; from 47.4% at batch start).
+- `getRunRow`/`getState` expose org context; workflow state honors the
+  encryption codec across start/advance/fan-out/pause/persist.
+
+### Security
+- `security.yml` unchanged but now exercises the new nullable/encrypted
+  columns; gitleaks gate covers the full diff.
+
+### Validated live (this release)
+17/17 live parity PASS on the running control plane (health/ready/metrics,
+24-agent roster, skills+overrides lifecycle, execution feedback + stats,
+A2A gate default-off, tenant isolation across overrides/executions/A2A,
+hash-chained audit). Dashboard production build green; governance monitor
+"Pipeline healthy" (14/16, 2 advisory).
+
 ## [0.9.1] — 2026-08-26
 
 ### Fixed — post-upgrade validation cycle (live container findings)
