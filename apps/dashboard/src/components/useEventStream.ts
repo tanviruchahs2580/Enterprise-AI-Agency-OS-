@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { getApiKey } from "../api.ts";
+import { api } from "../api.ts";
 
 export interface DomainEvent {
   seq?: number;
@@ -13,9 +13,9 @@ export interface DomainEvent {
 }
 
 /**
- * Live event stream via SSE. Uses a one-time ticket (API key never in URL),
- * resumes with Last-Event-ID on reconnect, and falls back to nothing if the
- * server is unreachable (UI does not block on telemetry).
+ * Live event stream via SSE. Uses a one-time ticket (key never in URL; the
+ * httpOnly session cookie authenticates the request), resumes with Last-Event-ID
+ * on reconnect, and degrades silently if the server is unreachable.
  */
 export function useEventStream(enabled = true, limit = 60): DomainEvent[] {
   const [events, setEvents] = useState<DomainEvent[]>([]);
@@ -23,18 +23,10 @@ export function useEventStream(enabled = true, limit = 60): DomainEvent[] {
   const lastIdRef = useRef<number>(0);
 
   const connect = useCallback(() => {
-    const key = getApiKey();
-    if (!key) return;
     let closed = false;
     (async () => {
       try {
-        const res = await fetch("/api/v1/events/ticket", {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-          body: "{}",
-        });
-        if (!res.ok) return;
-        const { ticket } = (await res.json()) as { ticket: string };
+        const { ticket } = await api<{ ticket: string }>("POST", "/events/ticket");
         if (closed) return;
         const url = `/api/v1/events?ticket=${encodeURIComponent(ticket)}`;
         const es = new EventSource(url);
@@ -66,30 +58,13 @@ export function useEventStream(enabled = true, limit = 60): DomainEvent[] {
   return events;
 }
 
-/** Thin wrapper over react-query for GET requests against /api/v1. */
+/** Thin wrapper over react-query for GET requests against /api/v1 (cookie-first). */
 export function useApiQuery<T>(key: string, path: string, options?: { refetchInterval?: number }) {
   return useQuery<T>({
     queryKey: [key],
     queryFn: async () => {
-      const key2 = getApiKey();
-      const url = path.startsWith("/api/v1") ? path : `/api/v1${path}`;
-      const res = await fetch(url, { headers: { authorization: `Bearer ${key2}` } });
-      const ct = res.headers.get("content-type") ?? "";
-      const text = await res.text();
-      if (!ct.includes("application/json") && text.trimStart().startsWith("<")) {
-        throw new Error("Control plane unreachable (received HTML). Is the API server running on :3000 and reachable from this dashboard?");
-      }
-      let json: unknown = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        throw new Error("Control plane returned a non-JSON response.");
-      }
-      if (!res.ok) {
-        const err = (json as { error?: { message?: string } }).error ?? { message: res.statusText };
-        throw new Error(err.message ?? res.statusText);
-      }
-      return json as T;
+      const res = await api<T>("GET", path);
+      return res as T;
     },
     refetchInterval: options?.refetchInterval,
     retry: 1,

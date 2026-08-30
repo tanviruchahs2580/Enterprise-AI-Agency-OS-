@@ -1,37 +1,73 @@
 import { useCallback, useEffect, useState } from "react";
 
-// Security: never persist the admin key in localStorage (readable by any XSS).
-// Use sessionStorage (cleared on tab close) plus an in-memory cache so a reload
-// within the session keeps the user signed in without long-lived persistence.
-// Production should move to an httpOnly secure cookie set by the control plane.
-const KEY_STORAGE = "agencyos.apiKey";
-// Local-dev convenience: if no key is configured, fall back to the bootstrap
-// admin key so the dashboard is fully functional against a local control plane
-// started with ADMIN_BOOTSTRAP_KEY=demo-key. Production deployments require a
-// real key to be set via Settings.
-const DEFAULT_LOCAL_KEY = "demo-key";
+// Security (audit Phase 1.2): the admin key is NEVER persisted in browser
+// storage (sessionStorage/localStorage are both XSS-readable). Authentication
+// rides on an httpOnly SameSite cookie issued by POST /api/v1/auth/session.
+// The raw key exists only in a module-scoped variable for the exchange and as
+// a development-only bootstrap fallback; it is not written anywhere.
+//
+// Local-dev convenience: with no configured key the dashboard falls back to the
+// bootstrap admin key so it works out of the box against a control plane started
+// with ADMIN_BOOTSTRAP_KEY=demo-key. Production builds never embed a default key;
+// the operator sets a real key via Settings, which is then exchanged for a cookie.
+const DEFAULT_LOCAL_KEY = import.meta.env.DEV ? "demo-key" : "";
 let memKey: string | null = null;
+let sessionReady = false;
 
 export function getApiKey(): string {
   if (memKey !== null) return memKey;
-  try {
-    memKey = sessionStorage.getItem(KEY_STORAGE) ?? "";
-  } catch {
-    memKey = "";
-  }
-  if (!memKey) memKey = DEFAULT_LOCAL_KEY;
+  memKey = DEFAULT_LOCAL_KEY;
   return memKey;
 }
 export function setApiKey(key: string): void {
   memKey = key;
-  try {
-    if (key) sessionStorage.setItem(KEY_STORAGE, key);
-    else sessionStorage.removeItem(KEY_STORAGE);
-  } catch {}
+  sessionReady = false; // re-establish a fresh httpOnly session with the new key
 }
 export function clearApiKey(): void {
   memKey = null;
-  try { sessionStorage.removeItem(KEY_STORAGE); } catch {}
+  sessionReady = false;
+  // Best-effort logout: revoke the server-side session cookie.
+  try {
+    void fetch("/api/v1/auth/session", { method: "DELETE", credentials: "include" });
+  } catch {
+    /* control plane unreachable during sign-out is non-fatal */
+  }
+}
+
+function fetchWithAuth(
+  url: string,
+  method: string,
+  body?: unknown,
+  useKey = false
+): Promise<Response> {
+  const hasBody = body !== undefined;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (useKey) {
+    const key = getApiKey();
+    if (key) headers.authorization = `Bearer ${key}`;
+  }
+  return fetch(url, {
+    method,
+    headers,
+    credentials: "include",
+    body: hasBody ? JSON.stringify(body) : method === "GET" || method === "DELETE" ? undefined : "{}",
+  });
+}
+
+/** Exchange the in-memory key for an httpOnly session cookie (idempotent). */
+async function ensureSession(): Promise<boolean> {
+  if (sessionReady) return true;
+  if (!getApiKey()) return false;
+  try {
+    const res = await fetchWithAuth("/api/v1/auth/session", "POST", {}, true);
+    if (res.ok) {
+      sessionReady = true;
+      return true;
+    }
+  } catch {
+    /* keep sessionReady=false; caller retries via the key path */
+  }
+  return false;
 }
 
 export class ApiError extends Error {
@@ -52,17 +88,20 @@ export async function api<T = unknown>(
   // All control-plane routes are served under /api/v1 (including health/readiness
   // aliases) so the Vite dev proxy forwards them to the API instead of serving SPA HTML.
   const url = path.startsWith("/api/v1") ? path : `/api/v1${path}`;
-  // Always send a JSON content-type so Fastify's parser accepts the request
-  // even when the body is empty (e.g. the SSE ticket exchange).
-  const hasBody = body !== undefined;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${getApiKey()}`,
-    },
-    body: hasBody ? JSON.stringify(body) : method === "GET" || method === "DELETE" ? undefined : "{}",
-  });
+
+  // Cookie-first: never attach the raw key unless the httpOnly session cookie
+  // is unavailable. A single 401 triggers a cookie exchange + one retry.
+  let res = await fetchWithAuth(url, method, body, false);
+  if (res.status === 401 && !sessionReady) {
+    if (await ensureSession()) {
+      res = await fetchWithAuth(url, method, body, false);
+    } else {
+      // No cookie and no way to establish one — fall back to the raw key path
+      // (non-browser clients / test harnesses that cannot hold cookies).
+      res = await fetchWithAuth(url, method, body, true);
+    }
+  }
+
   const ct = res.headers.get("content-type") ?? "";
   const text = await res.text();
   if (!ct.includes("application/json") && text.trimStart().startsWith("<")) {
@@ -96,7 +135,7 @@ export function useApi<T>(path: string, deps: unknown[] = []): {
     let alive = true;
     setLoading(true);
     setError(null);
-    api<T>(path.includes("/api/v1") ? "GET" : "GET", path)
+    api<T>("GET", path)
       .then((d) => {
         if (alive) setData(d);
       })
@@ -123,12 +162,13 @@ export interface DomainEvent {
   payload: Record<string, unknown>;
 }
 
-/** Live SSE subscription via one-time tickets (API key never in URL). */
+/** Live SSE subscription via one-time tickets (API key never in URL; the
+ *  session httpOnly cookie authenticates the request). */
 export function useEventStream(enabled = true): DomainEvent[] {
   const [events, setEvents] = useState<DomainEvent[]>([]);
 
   useEffect(() => {
-    if (!enabled || !getApiKey()) return;
+    if (!enabled) return;
     let es: EventSource | null = null;
     let closed = false;
 

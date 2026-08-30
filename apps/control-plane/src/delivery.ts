@@ -420,12 +420,13 @@ export async function executeDelivery(
   void receipt;
 
   // Optional completion webhook (HMAC-signed) — fires for succeeded AND blocked.
-  if (ctx.config.WEBHOOK_OUTBOUND_URL && ctx.config.WEBHOOK_OUTBOUND_SECRET) {
+  const webhookSecret = ctx.secrets?.get("WEBHOOK_OUTBOUND_SECRET") ?? ctx.config.WEBHOOK_OUTBOUND_SECRET;
+  if (ctx.config.WEBHOOK_OUTBOUND_URL && webhookSecret) {
     try {
       const { SignedWebhookEmitter } = await import("@agency/integrations");
       const emitter = new SignedWebhookEmitter({
         url: ctx.config.WEBHOOK_OUTBOUND_URL,
-        secret: ctx.config.WEBHOOK_OUTBOUND_SECRET,
+        secret: webhookSecret,
       });
       void emitter.emit(out.ok ? "delivery.completed" : "delivery.blocked", {
         executionId: opts.executionId,

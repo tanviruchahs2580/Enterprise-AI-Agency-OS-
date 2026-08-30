@@ -3,9 +3,25 @@ import { buildApp } from "./app.ts";
 import { registerWorkers } from "./workers.ts";
 import { registerDeliveryWorkers } from "./delivery-worker.ts";
 import { sweepExpiredApprovals } from "./sweeper.ts";
+import { SENSITIVE_KEYS } from "@agency/core";
 
 async function main(): Promise<void> {
   const ctx = buildContext();
+
+  // Warm any async secret backend (Vault) before serving traffic. Failures
+  // must not brick the whole plane — sensitive use will refuse loudly later.
+  if (ctx.config.SECRET_BACKEND === "vault" && ctx.secrets.prime) {
+    try {
+      await ctx.secrets.prime(SENSITIVE_KEYS);
+      const missing = ctx.secrets.missing ?? [];
+      if (missing.length > 0) {
+        ctx.log.warn("vault backend: secrets not found", { missing });
+      }
+      ctx.log.info("vault secrets primed", { backend: ctx.secrets.backend });
+    } catch (e) {
+      ctx.log.error("vault secret priming failed", { error: String(e) });
+    }
+  }
 
   // bootstrap admin key + agent roster
   const { AuthService } = await import("./auth.ts");
@@ -68,6 +84,7 @@ async function main(): Promise<void> {
     clearInterval(sweeper);
     ctx.jobs.stop();
     await app.close();
+    await ctx.tracing.shutdown();
     // Explicitly release the database handle so WAL frames are checkpointed
     // before the process exits (graceful, durable shutdown).
     try {

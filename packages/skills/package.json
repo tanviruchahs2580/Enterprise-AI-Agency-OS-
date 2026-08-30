@@ -1,0 +1,12 @@
+{
+  "name": "@agency/skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@agency/core": "*",
+    "yaml": "^2.5.0"
+  }
+}

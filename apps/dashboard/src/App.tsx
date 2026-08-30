@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { getApiKey, setApiKey } from "./api.ts";
+import { getApiKey, setApiKey, api } from "./api.ts";
 import { useApiQuery } from "./components/useEventStream.ts";
 import { Button } from "./components/ui.tsx";
 
@@ -33,7 +33,7 @@ function useTheme() {
 }
 
 export default function App() {
-  const [key, setKey] = useState(getApiKey());
+  const [authed, setAuthed] = useState(() => Boolean(getApiKey()));
   const [mobileNav, setMobileNav] = useState(false);
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
@@ -50,8 +50,20 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // A valid httpOnly session cookie alone is enough to enter the console (no
+  // persisted key). Probe the session endpoint; any error leaves the login gate.
+  useEffect(() => {
+    let alive = true;
+    api<{ active: boolean }>("GET", "/auth/session")
+      .then((r) => { if (alive && r.active) setAuthed(true); })
+      .catch(() => { /* no cookie session and no key yet */ })
+      .finally(() => { if (alive) setAuthed((a) => a); });
+    return () => { alive = false; };
+  }, []);
 
-  if (!key) return <Login onAuth={(k) => { setApiKey(k); setKey(k); }} />;
+  if (!authed) {
+    return <Login onAuth={(k) => { setApiKey(k); setAuthed(true); }} />;
+  }
 
   return (
     <div className="flex min-h-screen bg-bg text-text">
@@ -81,7 +93,7 @@ export default function App() {
         </nav>
         <button
           className="m-3 text-sm text-text-dim hover:text-text"
-          onClick={() => { setApiKey(""); setKey(""); }}
+          onClick={() => { setApiKey(""); setAuthed(false); }}
         >
           ⏻ Lock console
         </button>
@@ -140,34 +152,57 @@ export default function App() {
 
 function Login({ onAuth }: { onAuth: (k: string) => void }) {
   const [draft, setDraft] = useState("");
+  const [sso, setSso] = useState(false);
   const navigate = useNavigate();
+  // Probe the public /meta endpoint to learn whether OIDC/SSO sign-in exists.
+  useEffect(() => {
+    let alive = true;
+    api<{ capabilities: { auth: { modes: string[] } } }>("GET", "/meta")
+      .then((m) => { if (alive) setSso((m.capabilities?.auth?.modes ?? []).includes("oidc-sso")); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   return (
     <div className="min-h-screen grid place-items-center bg-bg p-4">
-      <form
-        className="w-[380px] bg-bg-panel border border-border rounded-xl p-7 shadow-pop animate-fade-in"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (draft.trim()) { onAuth(draft.trim()); navigate("/"); }
-        }}
-      >
+      <div className="w-[380px] bg-bg-panel border border-border rounded-xl p-7 shadow-pop animate-fade-in">
         <div className="font-bold text-lg">Agency OS</div>
         <div className="text-xs text-text-dim mb-5">Enterprise Control Plane</div>
-        <p className="text-sm text-text-dim mb-4">
-          Enter your control-plane API key. The bootstrap admin key is printed once when the server starts.
-        </p>
-        <label htmlFor="apikey" className="block text-xs text-text-dim mb-1">API key</label>
-        <input
-          id="apikey"
-          className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/60"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="paste API key…"
-          autoFocus
-        />
-        <div className="mt-4">
-          <Button type="submit" disabled={!draft.trim()} className="w-full">Sign in</Button>
-        </div>
-      </form>
+
+        {sso && (
+          <>
+            <a href="/api/v1/auth/oidc/login" className="block w-full">
+              <Button type="button" className="w-full" variant="outline">Continue with SSO</Button>
+            </a>
+            <div className="flex items-center gap-2 my-4 text-xs text-text-dim">
+              <span className="h-px flex-1 bg-border" /><span>or API key</span><span className="h-px flex-1 bg-border" />
+            </div>
+          </>
+        )}
+
+        <form
+          className={sso ? "" : ""}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft.trim()) { onAuth(draft.trim()); navigate("/"); }
+          }}
+        >
+          <p className="text-sm text-text-dim mb-4">
+            Enter your control-plane API key. The bootstrap admin key is printed once when the server starts.
+          </p>
+          <label htmlFor="apikey" className="block text-xs text-text-dim mb-1">API key</label>
+          <input
+            id="apikey"
+            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-accent/60"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="paste API key…"
+            autoFocus={!sso}
+          />
+          <div className="mt-4">
+            <Button type="submit" disabled={!draft.trim()} className="w-full">Sign in</Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

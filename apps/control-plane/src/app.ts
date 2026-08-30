@@ -2,12 +2,17 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { AppError, sha256Hex, newToken } from "@agency/core";
 import type { Identity } from "./auth.ts";
 import { AuthService } from "./auth.ts";
+import { OidcClient, OidcStateStore } from "./oidc.ts";
 import type { AppContext } from "./context.ts";
 import { assertDeliveryDemoFlags, DELIVERY_STAGES } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 import { createRateLimitStore, routeClassFor } from "./ratelimit.ts";
+import { validateSkill, type Skill } from "@agency/skills";
+import { parse } from "yaml";
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics", "/api/v1/health", "/api/v1/ready", "/api/v1/live", "/api/v1/metrics"]);
+/** OIDC endpoints are unauthenticated by design (they ARE the login). */
+const OIDC_PUBLIC_PATHS = new Set(["/api/v1/auth/oidc/login", "/api/v1/auth/oidc/callback"]);
 
 /** One-time, short-TTL tickets so EventSource never carries the API key. */
 interface SseTicket {
@@ -27,6 +32,12 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       limits: { default: ctx.config.RATE_LIMIT_MAX, dispatch: 60 },
     }
   );
+
+  // ADR-0007 IdentityProvider seam (audit Phase 2): OIDC/SSO client + server-side
+  // state store. Activated only when OIDC_ENABLED — otherwise zero overhead.
+  const oidc = ctx.config.OIDC_ENABLED ? new OidcClient(ctx.config) : null;
+  const oidcStates = new OidcStateStore();
+  void oidcStates;
 
   const app = Fastify({
     logger: false,
@@ -49,6 +60,7 @@ export function buildApp(ctx: AppContext): FastifyInstance {
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url.split("?")[0] ?? req.url;
     if (PUBLIC_PATHS.has(url)) return;
+    if (OIDC_PUBLIC_PATHS.has(url)) return;
 
     // ---- Phase A/F-03: CORS origin enforcement (browser requests only) ----
     const origin = req.headers.origin;
@@ -62,18 +74,30 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       }
     }
 
+    // ---- logout must always be allowed so browsers can clear stale cookies ----
+    if (req.method === "DELETE" && url === "/api/v1/auth/session") return;
+
     const header = req.headers.authorization;
     let token: string | undefined;
+    let sessionToken: string | undefined;
     let sseTicket: string | undefined;
     if (header?.startsWith("Bearer ")) {
       token = header.slice(7);
     } else if (url === "/api/v1/events") {
       // EventSource cannot send headers; clients exchange the API key for a
-      // one-time short-TTL ticket (POST /api/v1/events/ticket) first.
+      // one-time short-TTL ticket (POST /api/v1/events/ticket) first. Same-origin
+      // EventSource requests may also authenticate via the httpOnly session cookie.
       sseTicket = new URLSearchParams(req.url.split("?")[1] ?? "").get("ticket") ?? undefined;
     }
+    if (!token && !sseTicket) {
+      sessionToken = readSessionCookie(req.headers.cookie, ctx.config.SESSION_COOKIE_NAME);
+    }
 
-    const identity = sseTicket ? consumeSseTicket(sseTicket) : auth.authenticate(token);
+    let identity: Identity;
+    if (sseTicket) identity = consumeSseTicket(sseTicket);
+    else if (token) identity = auth.authenticate(token);
+    else if (sessionToken) identity = auth.authenticateSession(sessionToken);
+    else identity = auth.authenticate(undefined); // throws unauthenticated
     (req as FastifyRequest & { identity?: Identity }).identity = identity;
 
     // Identity-aware rate buckets: hash(keyId|ip) — collision-resistant,
@@ -208,6 +232,16 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     version: "0.10.0",
     apiVersion: "v1",
     features: featureFlags(ctx),
+    capabilities: {
+      skillLoader: true,
+      skills: ctx.skills.count(),
+      workflowTemplates: ctx.workflowTemplates.count(),
+      auth: {
+        modes: ctx.config.OIDC_ENABLED ? ["api-key", "httpOnly-session", "oidc-sso"] : ["api-key", "httpOnly-session"],
+        cookie: ctx.config.SESSION_COOKIE_NAME,
+      },
+      rosterAgents: ctx.agents.list(ctx.defaultOrgId()).length,
+    },
     docs: "/docs",
   }));
 
@@ -624,6 +658,124 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { newKeyId: rotated.newKeyId, keyMaterial: rotated.keyMaterial };
   });
 
+  // ---------- auth sessions (audit Phase 1.2: httpOnly cookie) ----------
+  const sessionSecure = () =>
+    ctx.config.SESSION_COOKIE_SECURE || ctx.config.NODE_ENV === "production";
+
+  app.post("/api/v1/auth/session", async (req, reply) => {
+    // Requires a valid Bearer API key; produces a short-lived httpOnly session
+    // token in a cookie so browsers never persist the raw key in storage.
+    const me = ident(req);
+    const ttlMs = Number((req.body as { ttlDays?: number } | undefined)?.ttlDays ?? 0) * 86_400_000 ||
+      ctx.config.SESSION_TTL_MS;
+    const session = auth.createSession(me, ttlMs);
+    const secure = sessionSecure();
+    reply.header("set-cookie", sessionCookieHeader(ctx.config.SESSION_COOKIE_NAME, session.token, ttlMs / 1000, secure));
+    auditEvent(ctx, me, "auth.session_created", "auth_session", session.sessionId, "low", {
+      ttlMs,
+      secure,
+      cookie: ctx.config.SESSION_COOKIE_NAME,
+    });
+    reply.code(201);
+    return { sessionId: session.sessionId, expiresAt: session.expiresAt };
+  });
+
+  // Logout is unauthenticated (handled early in onRequest) so stale cookies can
+  // always be cleared by the browser.
+  app.delete("/api/v1/auth/session", async (req, reply) => {
+    const cookieToken = readSessionCookie(req.headers.cookie, ctx.config.SESSION_COOKIE_NAME);
+    if (cookieToken) {
+      const revoked = auth.revokeSession(cookieToken);
+      if (revoked) {
+        ctx.audit.append({
+          orgId: ctx.defaultOrgId(),
+          actorType: "user",
+          actorId: "session",
+          action: "auth.session_revoked",
+          resourceType: "auth_session",
+          resourceId: "cookie",
+          riskLevel: "low",
+          decision: "allow",
+          result: "success",
+        });
+      }
+    }
+    reply.header("set-cookie", clearSessionCookieHeader(ctx.config.SESSION_COOKIE_NAME));
+    return { ok: true };
+  });
+
+  app.get("/api/v1/auth/session", async (req) => {
+    const me = ident(req);
+    return { active: true, role: me.role, name: me.name, orgId: me.orgId };
+  });
+
+  // ---------- OIDC/SSO (audit Phase 2: ADR-0007 IdentityProvider seam) ----------
+  // The control plane consumes the IdP's tokens server-side and mints a normal
+  // httpOnly session cookie; the browser never sees the IdP's tokens.
+  function oidcCallbackUrl(req: FastifyRequest): string {
+    if (ctx.config.OIDC_REDIRECT_URI) return ctx.config.OIDC_REDIRECT_URI;
+    const proto = req.headers["x-forwarded-proto"] ?? (req.protocol || "http");
+    const host = req.headers["x-forwarded-host"] ?? req.hostname;
+    return `${proto}://${host}/api/v1/auth/oidc/callback`;
+  }
+
+  // Initiates the dance: redirects the browser to the IdP authorize endpoint.
+  app.get("/api/v1/auth/oidc/login", async (req, reply) => {
+    if (!oidc) throw new AppError("VALIDATION_ERROR", "OIDC is not enabled (OIDC_ENABLED=false)");
+    const redirectUri = oidcCallbackUrl(req);
+    const created = oidcStates.create(redirectUri);
+    const location = await oidc.authorizationUrl(created.state, created.codeVerifier, created.nonce, redirectUri);
+    auditEvent(ctx, { userId: "anonymous", orgId: ctx.defaultOrgId(), role: "VIEWER", name: "oidc-initiate", keyId: "none" },
+      "auth.oidc_login_initiated", "auth", "/api/v1/auth/oidc/login", "low", { issuer: ctx.config.OIDC_ISSUER });
+    reply.redirect(location);
+    return reply;
+  });
+
+  // IdP callback: verify state/nonce + id_token, upsert the OIDC identity, and
+  // land it in the dashboard with an httpOnly session cookie.
+  app.get("/api/v1/auth/oidc/callback", async (req, reply) => {
+    if (!oidc) throw new AppError("VALIDATION_ERROR", "OIDC is not enabled (OIDC_ENABLED=false)");
+    const q = req.query as { code?: string; state?: string; error?: string };
+    if (q.error) throw new AppError("UNAUTHENTICATED", `OIDC authorization failed: ${q.error}`);
+    if (!q.code || !q.state) throw new AppError("VALIDATION_ERROR", "missing code or state");
+    const rec = oidcStates.consume(q.state);
+    const tokenResult = await oidc.exchangeCode(q.code, rec.codeVerifier, rec.redirectUri);
+    const claims = await oidc.verifyIdToken(tokenResult.idToken, rec.nonce);
+
+    const sub = String(claims.sub);
+    const role = extractClaim(claims, ctx.config.OIDC_ROLE_CLAIM, "VIEWER");
+    const orgClaim = extractClaim(claims, ctx.config.OIDC_ORG_CLAIM, undefined);
+    const orgId = orgClaim && ctx.db.get("SELECT id FROM organizations WHERE id = ?", [orgClaim])
+      ? String(orgClaim)
+      : ctx.defaultOrgId();
+    const email = typeof claims.email === "string" ? claims.email : undefined;
+    const name = typeof claims.name === "string" ? claims.name : (email ?? sub);
+    const now = ctx.db.now();
+    const existing = ctx.db.get<{ id: string }>("SELECT id FROM oidc_users WHERE sub = ?", [sub]);
+    if (existing) {
+      ctx.db.run("UPDATE oidc_users SET org_id=?, role=?, name=?, email=?, updated_at=?, last_login_at=? WHERE id=?",
+        [orgId, role, name, email ?? null, now, now, existing.id]);
+    } else {
+      const id = cryptoRandomId("oidc");
+      ctx.db.insert("oidc_users", {
+        id, sub, email: email ?? null, name, org_id: orgId, role,
+        created_at: now, updated_at: now, last_login_at: now,
+      });
+    }
+
+    const identity: Identity = { userId: `oidc:${sub}`, orgId, role: role ?? "VIEWER", name, keyId: `oidc:${sub.slice(0, 24)}` };
+    const session = auth.createSession(identity);
+    const secure = sessionSecure();
+    reply.header("set-cookie", sessionCookieHeader(ctx.config.SESSION_COOKIE_NAME, session.token, ctx.config.SESSION_TTL_MS / 1000, secure));
+    auditEvent(ctx, identity, "auth.oidc_logged_in", "auth_session", session.sessionId, "low", {
+      issuer: ctx.config.OIDC_ISSUER, role, orgId, sso: true,
+    });
+    const home = req.headers["x-forwarded-proto"] ?? req.protocol;
+    const host = req.headers["x-forwarded-host"] ?? req.hostname;
+    reply.redirect(`${home}://${host}/`);
+    return reply;
+  });
+
   // ---------- Phase 41: notifications ----------
   function pushNotification(ctx2: AppContext, orgId2: string, topic: string, payloadObj: Record<string, unknown>): void {
     ctx2.db.insert("notifications", {
@@ -680,7 +832,294 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const me = ident(req);
     auth.requirePermission(me, "agent:manage");
     const n = ctx.agents.seedRoster(me.orgId);
-    return { seeded: n };
+    return { seeded: n, rosterSize: ctx.agents.list(me.orgId).length };
+  });
+
+  // ---------- skills (audit Phase 1: skill loader shipped; Phase 4: org overrides) ----------
+  app.get("/api/v1/skills", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "agent:read");
+    const skills = ctx.skills.list().map((s) => {
+      const eff = effectiveSkill(ctx, me.orgId, s.name);
+      return {
+        name: eff.name,
+        version: eff.version,
+        description: eff.description,
+        requiredTools: eff.requiredTools,
+        requiredPermissions: eff.requiredPermissions,
+        overridden: eff !== s,
+      };
+    });
+    const skillsByAgent: Record<string, string[]> = {};
+    for (const a of ctx.db.all(
+      "SELECT name, skills FROM agents WHERE org_id = ? AND skills != '[]'",
+      [me.orgId]
+    )) {
+      skillsByAgent[String(a.name)] = safeJson(String(a.skills ?? "[]")) as string[];
+    }
+    const orgOverrides = ctx.db.all(
+      "SELECT skill_name, enabled FROM org_skill_overrides WHERE org_id = ? ORDER BY skill_name",
+      [me.orgId]
+    );
+    return {
+      count: skills.length,
+      registryIssues: ctx.skills.issues,
+      skillsByAgent,
+      orgOverrides: orgOverrides.map((o) => ({
+        skillName: String(o.skill_name),
+        enabled: Number(o.enabled) === 1,
+      })),
+      items: skills,
+    };
+  });
+
+  app.get("/api/v1/skills/:name", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "agent:read");
+    const { name } = req.params as { name: string };
+    const effective = effectiveSkill(ctx, me.orgId, name);
+    return { ...effective, overridden: effective !== ctx.skills.get(name) };
+  });
+
+  app.put("/api/v1/skills/overrides/:name", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "agent:manage");
+    const { name } = req.params as { name: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["definition"]);
+    // Only existing registry skills can be customized — creates stay declarative.
+    const base = ctx.skills.get(name);
+    const parsed = parseOverrideDefinition(String(body.definition));
+    const errors = validateSkill(parsed);
+    if (errors.length > 0) {
+      throw new AppError("VALIDATION_ERROR", `override for skill '${name}' is invalid: ${errors.join("; ")}`, {
+        details: { errors },
+      });
+    }
+    const override = parsed as Partial<Skill>;
+    if (override.name !== base.name) {
+      throw new AppError("VALIDATION_ERROR", "override definition name must match the overridden skill");
+    }
+    const enabled = body.enabled === undefined ? true : Boolean(body.enabled);
+    const now = ctx.db.now();
+    ctx.db.run(
+      `INSERT INTO org_skill_overrides (org_id, skill_name, definition, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(org_id, skill_name) DO UPDATE SET
+         definition = excluded.definition, enabled = excluded.enabled, updated_at = excluded.updated_at`,
+      [me.orgId, name, String(body.definition), enabled ? 1 : 0, now, now]
+    );
+    auditEvent(ctx, me, "skill.override_upsert", "skill_override", `${me.orgId}/${name}`, "medium", {
+      enabled,
+    });
+    return { ok: true, skillName: name, enabled, overridden: true };
+  });
+
+  app.delete("/api/v1/skills/overrides/:name", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "agent:manage");
+    const { name } = req.params as { name: string };
+    const res = ctx.db.driver.run("DELETE FROM org_skill_overrides WHERE org_id = ? AND skill_name = ?", [
+      me.orgId,
+      name,
+    ]);
+    auditEvent(ctx, me, "skill.override_delete", "skill_override", `${me.orgId}/${name}`, "medium", {});
+    return { ok: true, skillName: name, removed: Number(res.changes) > 0 };
+  });
+
+  // ---------- skill feedback loop (audit Phase 4: skill_executions metrics) ----------
+  const SKILL_OUTCOMES = new Set(["success", "failed", "skipped"]);
+  app.post("/api/v1/skills/executions", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:control");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["skillName", "outcome"]);
+    const skillName = String(body.skillName);
+    const outcome = String(body.outcome);
+    if (!SKILL_OUTCOMES.has(outcome)) {
+      throw new AppError("VALIDATION_ERROR", `outcome must be one of: ${[...SKILL_OUTCOMES].join(", ")}`);
+    }
+    if (!ctx.skills.has(skillName)) {
+      throw new AppError("VALIDATION_ERROR", `skill '${skillName}' is not registered`);
+    }
+    const startedAt = ctx.db.now();
+    const id = cryptoRandomId("skx");
+    ctx.db.insert("skill_executions", {
+      id,
+      org_id: me.orgId,
+      skill_name: skillName,
+      task_id: body.taskId ? String(body.taskId) : null,
+      outcome,
+      duration_ms: body.durationMs === undefined ? null : Number(body.durationMs),
+      cost_usd: body.costUsd === undefined ? null : Number(body.costUsd),
+      error: body.error ? String(body.error).slice(0, 4000) : null,
+      started_at: startedAt,
+      finished_at: startedAt,
+    });
+    return { ok: true, id };
+  });
+
+  app.get("/api/v1/skills/executions/stats", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const rows = ctx.db.all<{
+      skill_name: string;
+      outcome: string;
+      n: number;
+      avg_duration_ms: number | null;
+      sum_cost_usd: number | null;
+    }>(
+      `SELECT skill_name, outcome, COUNT(*) AS n,
+              AVG(duration_ms) AS avg_duration_ms, SUM(cost_usd) AS sum_cost_usd
+       FROM skill_executions WHERE org_id = ? GROUP BY skill_name, outcome`,
+      [me.orgId]
+    );
+    const bySkill: Record<string, Record<string, number | string>> = {};
+    const totals = { success: 0, failed: 0, skipped: 0, costUsd: 0, executions: 0 };
+    for (const r of rows) {
+      const key = r.outcome as "success" | "failed" | "skipped";
+      const entry = (bySkill[r.skill_name] ??= {});
+      entry[key] = Number(r.n);
+      totals[key] += Number(r.n);
+      totals.executions += Number(r.n);
+      totals.costUsd += Number(r.sum_cost_usd ?? 0);
+      if (r.avg_duration_ms !== null && entry.avgDurationMs === undefined) {
+        entry.avgDurationMs = Math.round(Number(r.avg_duration_ms));
+      }
+    }
+    return { bySkill, totals, orgId: me.orgId };
+  });
+
+  app.get("/api/v1/skills/executions", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const q = req.query as { limit?: string; skillName?: string };
+    const limit = Math.min(200, Math.max(1, Number(q.limit ?? 50)));
+    const items = q.skillName
+      ? ctx.db.all(
+          "SELECT id, skill_name, task_id, outcome, duration_ms, cost_usd, started_at FROM skill_executions WHERE org_id = ? AND skill_name = ? ORDER BY started_at DESC LIMIT ?",
+          [me.orgId, String(q.skillName), limit]
+        )
+      : ctx.db.all(
+          "SELECT id, skill_name, task_id, outcome, duration_ms, cost_usd, started_at FROM skill_executions WHERE org_id = ? ORDER BY started_at DESC LIMIT ?",
+          [me.orgId, limit]
+        );
+    return { count: items.length, items };
+  });
+
+  // ---------- agent-to-agent protocol (audit Phase 4: TaskCards v0.1) ----------
+  const A2A_STATUSES = new Set(["received", "accepted", "working", "completed", "failed", "cancelled"]);
+  const requireA2A = (): void => {
+    if (!ctx.config.FEATURE_A2A) {
+      throw new AppError("NOT_FOUND", "A2A protocol is disabled (FEATURE_A2A=false)");
+    }
+  };
+
+  app.post("/api/v1/a2a/cards", async (req, reply) => {
+    requireA2A();
+    const me = ident(req);
+    auth.requirePermission(me, "execution:control");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["direction", "payload"]);
+    const direction = String(body.direction);
+    if (direction !== "inbound" && direction !== "outbound") {
+      throw new AppError("VALIDATION_ERROR", "direction must be 'inbound' or 'outbound'");
+    }
+    const id = cryptoRandomId("a2a");
+    const status = String(body.status ?? "received");
+    if (!A2A_STATUSES.has(status)) {
+      throw new AppError("VALIDATION_ERROR", `status must be one of: ${[...A2A_STATUSES].join(", ")}`);
+    }
+    const now = ctx.db.now();
+    ctx.db.insert("a2a_cards", {
+      id,
+      org_id: me.orgId,
+      direction,
+      status,
+      card_json: JSON.stringify(body.payload),
+      partner: body.partner ? String(body.partner).slice(0, 256) : null,
+      ack_token: body.ackToken ? String(body.ackToken) : null,
+      created_at: now,
+      updated_at: now,
+    });
+    auditEvent(ctx, me, "a2a.card_created", "a2a_card", id, "medium", { direction, status });
+    reply.code(201);
+    return { id, direction, status, ackToken: body.ackToken ? String(body.ackToken) : null };
+  });
+
+  app.get("/api/v1/a2a/cards", async (req) => {
+    requireA2A();
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const q = req.query as { limit?: string; direction?: string; status?: string };
+    const limit = Math.min(200, Math.max(1, Number(q.limit ?? 50)));
+    const clauses = ["org_id = ?"];
+    const params: unknown[] = [me.orgId];
+    if (q.direction) {
+      clauses.push("direction = ?");
+      params.push(String(q.direction));
+    }
+    if (q.status) {
+      clauses.push("status = ?");
+      params.push(String(q.status));
+    }
+    params.push(limit);
+    const items = ctx.db.all(
+      `SELECT id, direction, status, partner, card_json, created_at, updated_at
+       FROM a2a_cards WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
+      params
+    );
+    return {
+      count: items.length,
+      protocol: "TaskCard v0.1",
+      items: items.map((c) => ({ ...c, payload: safeJson(String(c.card_json)) })),
+    };
+  });
+
+  app.get("/api/v1/a2a/cards/:id", async (req) => {
+    requireA2A();
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const { id } = req.params as { id: string };
+    const card = ctx.db.get("SELECT * FROM a2a_cards WHERE id = ? AND org_id = ?", [id, me.orgId]);
+    if (!card) throw new AppError("NOT_FOUND", "a2a card not found");
+    return { ...card, payload: safeJson(String(card.card_json)) };
+  });
+
+  app.post("/api/v1/a2a/cards/:id/status", async (req) => {
+    requireA2A();
+    const me = ident(req);
+    auth.requirePermission(me, "execution:control");
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["status"]);
+    const status = String(body.status);
+    if (!A2A_STATUSES.has(status)) {
+      throw new AppError("VALIDATION_ERROR", `status must be one of: ${[...A2A_STATUSES].join(", ")}`);
+    }
+    const card = ctx.db.get<{
+      id: string;
+      org_id: string;
+      direction: string;
+      status: string;
+      ack_token: string | null;
+    }>("SELECT id, org_id, direction, status, ack_token FROM a2a_cards WHERE id = ? AND org_id = ?", [
+      id,
+      me.orgId,
+    ]);
+    if (!card) throw new AppError("NOT_FOUND", "a2a card not found");
+    const now = ctx.db.now();
+    const patch: Record<string, unknown> = { status, updated_at: now };
+    if (status === "accepted" && !card.ack_token) {
+      patch.ack_token = newToken(16);
+    }
+    ctx.db.updateById("a2a_cards", id, patch);
+    auditEvent(ctx, me, "a2a.card_status", "a2a_card", id, "medium", { from: card.status, to: status });
+    const updated = ctx.db.get<{ ack_token: string | null }>(
+      "SELECT ack_token FROM a2a_cards WHERE id = ? AND org_id = ?",
+      [id, me.orgId]
+    );
+    return { id, status, ackToken: updated?.ack_token ?? null };
   });
 
   app.post("/api/v1/agents/:id/heartbeat", async (req) => {
@@ -1425,20 +1864,63 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     };
   });
 
-  // ---------- workflow runs ----------
+  // ---------- workflow runs (audit Phase 2.2: path templates + risk tiers) ----------
+  const registryList = (defn: WorkflowDefinition) => ({
+    name: defn.name,
+    description: defn.description ?? "",
+    stages: defn.stages.map((s) => ({
+      name: s.name,
+      agentRole: s.agentRole,
+      lowRiskSkip: s.lowRiskSkip === true,
+      approvalRequired: s.approvalRequired === true,
+    })),
+  });
+
+  app.get("/api/v1/workflows", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:dispatch");
+    const builtins = [defaultWorkflowDefinition()];
+    const templates = ctx.workflowTemplates.list();
+    const items = [...builtins.map(registryList), ...templates.map(registryList)];
+    return {
+      count: items.length,
+      templates: items.map((i) => i.name),
+      registryIssues: ctx.workflowTemplates.issues,
+      items,
+    };
+  });
+
+  app.get("/api/v1/workflows/:name", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:dispatch");
+    const { name } = req.params as { name: string };
+    const defn = resolveWorkflow(ctx, name);
+    if (!defn) throw new AppError("NOT_FOUND", `workflow '${name}' not registered`);
+    return registryList(defn);
+  });
+
   app.post("/api/v1/workflows/:name/start", async (req, reply) => {
     const me = ident(req);
     auth.requirePermission(me, "task:dispatch");
     const { name } = req.params as { name: string };
-    const defn = defaultWorkflowFor(name);
+    const defn = resolveWorkflow(ctx, name);
     if (!defn) throw new AppError("NOT_FOUND", `workflow '${name}' not registered`);
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const riskTier = ["low", "medium", "high"].includes(String(body.riskTier ?? ""))
+      ? (String(body.riskTier) as RiskTier)
+      : "medium";
     const run = ctx.workflows.start(me.orgId, {
       definition: defn,
       projectId: body.projectId ? String(body.projectId) : undefined,
+      riskTier,
+      initialState: { requestedBy: me.userId },
+    });
+    auditEvent(ctx, me, "workflow.started", "workflow_run", run.runId, "medium", {
+      workflow: name,
+      riskTier,
     });
     reply.code(202);
-    return run;
+    return { ...run, riskTier };
   });
 
   app.get("/api/v1/workflows/runs/:id", async (req) => {
@@ -1607,8 +2089,25 @@ function featureFlags(ctx: AppContext): Record<string, boolean> {
     a2a: ctx.config.FEATURE_A2A,
     hermes: ctx.config.FEATURE_HERMES,
     vectorKnowledge: ctx.config.FEATURE_VECTOR_KNOWLEDGE,
-    github: Boolean(ctx.config.GITHUB_TOKEN),
+    github: Boolean(ctx.config.GITHUB_TOKEN || ctx.secrets?.get("GITHUB_TOKEN")),
+    skillLoader: true,
+    workflowTemplates: ctx.workflowTemplates.count() > 0,
+    oidcSso: Boolean(ctx.config.OIDC_ENABLED),
+    encryptionAtRest: Boolean(ctx.config.ENCRYPT_AT_REST && ctx.config.ENCRYPTION_MASTER_KEY),
+    tracing: Boolean(ctx.tracing.enabled),
   };
+}
+
+/** Read a boolean/string claim by dotted path; tolerate missing or non-string values. */
+function extractClaim(claims: Record<string, unknown>, path: string, fallback: string | undefined): string | undefined {
+  const value = path.split(".").reduce<unknown>((acc, part) => {
+    if (acc && typeof acc === "object") return (acc as Record<string, unknown>)[part];
+    return undefined;
+  }, claims);
+  if (Array.isArray(value) && value.length > 0) return String(value[0]);
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
 }
 
 function requireFields(body: Record<string, unknown>, fields: string[]): void {
@@ -1632,6 +2131,38 @@ function cryptoRandomId(prefix: string): string {
   const buf = new Uint8Array(12);
   crypto.getRandomValues(buf);
   return `${prefix}_${Buffer.from(buf).toString("hex")}`;
+}
+
+function safeJson(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return [];
+  }
+}
+
+function readSessionCookie(cookieHeader: string | undefined, name: string): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    const value = part.slice(eq + 1).trim();
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function sessionCookieHeader(name: string, token: string, maxAgeSecs: number, secure: boolean): string {
+  return `${name}=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${Math.floor(maxAgeSecs)}; SameSite=Strict${secure ? "; Secure" : ""}`;
+}
+
+function clearSessionCookieHeader(name: string): string {
+  return `${name}=; HttpOnly; Path=/; Max-Age=0; SameSite=Strict`;
 }
 
 function auditEvent(
@@ -1708,8 +2239,69 @@ function atomicIdempotencyPut(
 }
 
 // late import avoidance: default workflow comes from orchestration package via context wiring
-import { defaultWorkflowDefinition } from "@agency/orchestration";
-function defaultWorkflowFor(name: string) {
-  const d = defaultWorkflowDefinition();
-  return d.name === name ? d : undefined;
+import { defaultWorkflowDefinition, type WorkflowDefinition, type RiskTier } from "@agency/orchestration";
+function resolveWorkflow(ctx: AppContext, name: string): WorkflowDefinition | undefined {
+  const builtin = defaultWorkflowDefinition();
+  if (builtin.name === name) return builtin;
+  if (ctx.workflowTemplates.has(name)) return ctx.workflowTemplates.get(name);
+  return undefined;
+}
+
+// ---------- org skill overrides (audit Phase 4, T-I) ----------
+
+interface OrgSkillOverrideRow {
+  definition: string;
+  enabled: number;
+}
+
+function parseOverrideDefinition(source: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = parse(source);
+  } catch (e) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `override definition is not valid YAML: ${String(e instanceof Error ? e.message : e)}`
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new AppError("VALIDATION_ERROR", "override definition must be a YAML object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function orgSkillOverride(ctx: AppContext, orgId: string, name: string): OrgSkillOverrideRow | undefined {
+  return ctx.db.get<OrgSkillOverrideRow>(
+    "SELECT definition, enabled FROM org_skill_overrides WHERE org_id = ? AND skill_name = ? AND enabled = 1",
+    [orgId, name]
+  );
+}
+
+/**
+ * Per-org merged view of a skill: the declarative registry default, with the
+ * org's active override layered on top. A broken stored override (corrupt YAML
+ * or invalid schema) fails loudly at read time — silent degradation of agent
+ * contracts is not acceptable for governance.
+ */
+function effectiveSkill(ctx: AppContext, orgId: string, name: string): Skill {
+  const base = ctx.skills.get(name);
+  const ov = orgSkillOverride(ctx, orgId, name);
+  if (!ov) return base;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = parseOverrideDefinition(ov.definition);
+  } catch (e) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `org override for skill '${name}' is not valid YAML: ${String(e instanceof Error ? e.message : e)}`,
+      { cause: e }
+    );
+  }
+  const errors = validateSkill(parsed);
+  if (errors.length > 0) {
+    throw new AppError("VALIDATION_ERROR", `org override for skill '${name}' is invalid: ${errors.join("; ")}`, {
+      details: { errors },
+    });
+  }
+  return { ...base, ...(parsed as Partial<Skill>) };
 }

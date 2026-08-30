@@ -48,7 +48,10 @@ export default function Settings() {
       </Card>
 
       <Card title="API Key">
-        <label className="block text-xs text-text-dim mb-1">Control-plane API key (stored in sessionStorage, never persisted to disk)</label>
+        <label className="block text-xs text-text-dim mb-1">
+          Control-plane API key — exchanged for an httpOnly session cookie, never
+          stored in browser storage or persisted to disk.
+        </label>
         <input type="password" value={key} onChange={(e)=>setKey(e.target.value)} placeholder="e.g. cpk_live_…" className="w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text font-mono focus:outline-none focus:ring-2 focus:ring-accent/60" />
         <div className="mt-3 flex items-center gap-2">
           <Button onClick={saveKey} disabled={saving}>{saving ? "Saving…" : "Save key"}</Button>
