@@ -6,6 +6,7 @@ import { trace, type Span, type Tracer, type Attributes, SpanStatusCode } from "
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { FastifyInstrumentation } from "@opentelemetry/instrumentation-fastify";
 import type { AppConfig } from "@agency/core";
+import { AGENCY_OS_VERSION } from "./version.ts";
 
 /**
  * T-F: OpenTelemetry distributed tracing (previously blocked on deps/creds).
@@ -21,7 +22,7 @@ import type { AppConfig } from "@agency/core";
  * trace_id/span_id; services can join the trace via the `traceparent` header.
  */
 
-export const AGENCY_OS_TRACING_VERSION = "0.10.0";
+export const AGENCY_OS_TRACING_VERSION = AGENCY_OS_VERSION;
 
 export interface TracingHandle {
   readonly enabled: boolean;

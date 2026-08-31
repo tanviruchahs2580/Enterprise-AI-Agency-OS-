@@ -8,7 +8,26 @@ import { assertDeliveryDemoFlags, DELIVERY_STAGES } from "./delivery.ts";
 import { MetricsRegistry, metricsRouteLabel } from "./metrics.ts";
 import { createRateLimitStore, routeClassFor } from "./ratelimit.ts";
 import { validateSkill, type Skill } from "@agency/skills";
+import { SkillRuntime, evaluateRubric } from "@agency/skills";
+import {
+  AgentRegistry,
+  MissionCompiler,
+  CapabilityRouter,
+  computeReachability,
+  validateHandoff,
+  verificationPolicyFor,
+  DEFAULT_VERIFICATION_THRESHOLDS,
+  hashContent,
+  verifyRecord,
+  unbackedCompletionClaims,
+  CAPABILITY_IDS,
+  summarize as summarizeEvidence,
+  type AgentHandoff,
+  type ToolId,
+} from "@agency/orchestration";
+import type { ModelTier } from "@agency/models";
 import { parse } from "yaml";
+import { AGENCY_OS_VERSION } from "./version.ts";
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/live", "/api/v1/meta", "/metrics", "/api/v1/health", "/api/v1/ready", "/api/v1/live", "/api/v1/metrics"]);
 /** OIDC endpoints are unauthenticated by design (they ARE the login). */
@@ -229,12 +248,18 @@ export function buildApp(ctx: AppContext): FastifyInstance {
 
   app.get("/api/v1/meta", async () => ({
     name: "enterprise-ai-agency-os",
-    version: "0.10.0",
+    version: AGENCY_OS_VERSION,
     apiVersion: "v1",
     features: featureFlags(ctx),
     capabilities: {
       skillLoader: true,
       skills: ctx.skills.count(),
+      skillRuntime: true,
+      missionCompiler: true,
+      capabilityRouting: true,
+      workGraph: true,
+      handoffContract: true,
+      evidenceRegistry: true,
       workflowTemplates: ctx.workflowTemplates.count(),
       auth: {
         modes: ctx.config.OIDC_ENABLED ? ["api-key", "httpOnly-session", "oidc-sso"] : ["api-key", "httpOnly-session"],
@@ -313,6 +338,26 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     if (q.projectId) { sql += " AND project_id = ?"; params.push(q.projectId); }
     sql += " ORDER BY created_at DESC LIMIT 100";
     return { items: ctx.db.all(sql, params) };
+  });
+
+  // ---------- mission compiler (Phase 2: deterministic classification) ----------
+  app.post("/api/v1/missions/compile", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "mission:create");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["objective"]);
+    const plan = new MissionCompiler().compile({
+      objective: String(body.objective),
+      scope: body.scope !== undefined ? String(body.scope) : undefined,
+      constraints: Array.isArray(body.constraints) ? (body.constraints as string[]) : undefined,
+      acceptanceCriteria: Array.isArray(body.acceptanceCriteria) ? (body.acceptanceCriteria as string[]) : undefined,
+    });
+    auditEvent(ctx, me, "mission.compiled", "mission", "plan", "low", {
+      complexity: plan.complexity,
+      risk: plan.risk,
+      capabilities: plan.requiredCapabilities,
+    });
+    return { plan, compilerVersion: "1.0" };
   });
 
   // ---------- workstreams ----------
@@ -835,6 +880,89 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     return { seeded: n, rosterSize: ctx.agents.list(me.orgId).length };
   });
 
+  // ---------- capability routing (Phase 2: auditable agent dispatch) ----------
+  const rosterProfiles = (orgId: string) =>
+    ctx.agents.list(orgId).map((row) => {
+      const c = AgentRegistry.parseContract(row);
+      return {
+        name: String(row.name),
+        allowedTools: c.allowedTools as ToolId[],
+        forbiddenTools: c.forbiddenTools as ToolId[],
+        modelTier: c.modelTier as ModelTier,
+        budgetUsd: c.budgetUsd,
+        skills: c.skills,
+      };
+    });
+
+  app.post("/api/v1/routing/decide", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:dispatch");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["requiredCapabilities"]);
+    const capabilities = (body.requiredCapabilities as string[] ?? []);
+    const unknown = capabilities.filter((c) => !(CAPABILITY_IDS as readonly string[]).includes(c));
+    if (unknown.length > 0) {
+      throw new AppError("VALIDATION_ERROR", `unknown capability: ${unknown.join(", ")}`, { details: { unknown } });
+    }
+    const risk = body.risk === undefined ? undefined : String(body.risk) as "low" | "medium" | "high";
+    const decision = new CapabilityRouter().route({
+      requiredCapabilities: capabilities,
+      preferredAgent: body.preferredAgent !== undefined ? String(body.preferredAgent) : undefined,
+      risk,
+      roster: rosterProfiles(me.orgId),
+      requiredTools: Array.isArray(body.requiredTools) ? (body.requiredTools as string[]) as ToolId[] : undefined,
+    });
+    const id = cryptoRandomId("rtd");
+    ctx.db.insert("routing_decisions", {
+      id,
+      org_id: me.orgId,
+      task_id: body.taskId !== undefined ? String(body.taskId) : null,
+      mission_id: body.missionId !== undefined ? String(body.missionId) : null,
+      required_capabilities: JSON.stringify(capabilities),
+      preferred_agent: decision.preferredAgent ?? null,
+      risk: risk ?? null,
+      primary_agent_id: decision.primaryAgentId,
+      candidates_json: JSON.stringify(decision.candidates),
+      why_agent_selected: decision.whyAgentSelected,
+      policy_version: decision.policyVersion,
+      created_by: me.userId,
+      created_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "routing.decided", "routing_decision", id, "medium", {
+      primaryAgentId: decision.primaryAgentId,
+      candidates: decision.candidates.length,
+    });
+    reply.code(201);
+    return { id, decision };
+  });
+
+  app.get("/api/v1/routing/decisions", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    return {
+      items: ctx.db.all(
+        "SELECT id, task_id, mission_id, required_capabilities, preferred_agent, risk, primary_agent_id, candidates_json, why_agent_selected, policy_version, created_at FROM routing_decisions WHERE org_id=? ORDER BY created_at DESC LIMIT 100",
+        [me.orgId]
+      ),
+    };
+  });
+
+  // ---------- roster reachability (Phase 2: every agent reachable) ----------
+  app.get("/api/v1/agents/reachability", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "agent:read");
+    const report = computeReachability({
+      skills: ctx.skills.list().map((s) => s.name),
+      workflowTemplates: ctx.workflowTemplates.list(),
+    });
+    return {
+      total: report.total,
+      reachableCount: report.reachableCount,
+      unreachable: report.unreachable,
+      items: report.items.map((i) => ({ agentId: i.agentId, reachable: i.reachable, via: i.via })),
+    };
+  });
+
   // ---------- skills (audit Phase 1: skill loader shipped; Phase 4: org overrides) ----------
   app.get("/api/v1/skills", async (req) => {
     const me = ident(req);
@@ -1005,6 +1133,232 @@ export function buildApp(ctx: AppContext): FastifyInstance {
           [me.orgId, limit]
         );
     return { count: items.length, items };
+  });
+
+  // ---------- evidence registry (Phase 2: no completion claim without evidence) ----------
+  app.post("/api/v1/evidence", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:control");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["type", "source"]);
+    const type = String(body.type);
+    const source = String(body.source);
+    const claims = Array.isArray(body.claims) ? (body.claims as string[]).map(String) : [];
+    const content = body.content !== undefined ? String(body.content) : undefined;
+    let contentHash = body.contentHash !== undefined ? String(body.contentHash) : undefined;
+    if (content !== undefined) {
+      const computed = hashContent(content);
+      if (contentHash !== undefined && contentHash !== computed) {
+        throw new AppError("VALIDATION_ERROR", "contentHash does not match supplied content", {
+          details: { supplied: contentHash, computed },
+        });
+      }
+      contentHash = computed;
+    }
+    if (!contentHash) {
+      throw new AppError("VALIDATION_ERROR", "either content (computed hash) or contentHash is required");
+    }
+    const id = cryptoRandomId("evd");
+    ctx.db.insert("evidence_records", {
+      id, org_id: me.orgId,
+      execution_id: body.executionId !== undefined ? String(body.executionId) : null,
+      type, source, content_hash: contentHash,
+      claims: JSON.stringify(claims),
+      content_location: body.contentLocation !== undefined ? String(body.contentLocation) : null,
+      created_at: ctx.db.now(),
+    });
+    // Evidence guard: claims with a known evidence contract that no matching
+    // record exists for yet are surfaced immediately.
+    const existingTypes = ctx.db
+      .all<{ type: string }>("SELECT DISTINCT type FROM evidence_records WHERE org_id = ?", [me.orgId])
+      .map((r) => String(r.type));
+    const unbackedNow = unbackedCompletionClaims(claims, existingTypes);
+    auditEvent(ctx, me, "evidence.recorded", "evidence", id, "low", { type, unbackedNow });
+    reply.code(201);
+    return { id, contentHash, unbackedNow };
+  });
+
+  app.get("/api/v1/evidence", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const rows = ctx.db.all(
+      "SELECT id, execution_id, type, source, content_hash, claims, content_location, created_at FROM evidence_records WHERE org_id=? ORDER BY created_at DESC LIMIT 200",
+      [me.orgId]
+    );
+    const summary = summarizeEvidence(rows as never);
+    return {
+      count: rows.length,
+      summary,
+      items: rows.map((r) => ({
+        id: String(r.id),
+        executionId: r.execution_id,
+        type: String(r.type),
+        source: String(r.source),
+        contentHash: String(r.content_hash),
+        claims: safeJson(String(r.claims ?? "[]")),
+        contentLocation: r.content_location,
+        createdAt: String(r.created_at),
+      })),
+    };
+  });
+
+  app.post("/api/v1/evidence/:id/verify", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const { id } = req.params as { id: string };
+    const row = ctx.db.get(
+      "SELECT id, type, source, content_hash, claims FROM evidence_records WHERE org_id=? AND id=?",
+      [me.orgId, id]
+    );
+    if (!row) throw new AppError("NOT_FOUND", `evidence record ${id} not found`);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const verification = verifyRecord({
+      id,
+      content: body.content !== undefined ? String(body.content) : undefined,
+      contentHash: String(row.content_hash),
+    });
+    reply.code(200);
+    return { ...verification, type: String(row.type), source: String(row.source) };
+  });
+
+  // ---------- typed handoff contracts (Phase 2: what/was/remains + confidence) ----------
+  app.post("/api/v1/handoffs", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "task:dispatch");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["sender", "receiver", "intent", "payload", "confidence"]);
+    const handoff: Partial<AgentHandoff> = {
+      sender: String(body.sender),
+      receiver: String(body.receiver),
+      intent: String(body.intent) as AgentHandoff["intent"],
+      payload: body.payload as Record<string, unknown>,
+      evidence: Array.isArray(body.evidence) ? (body.evidence as string[]).map(String) : [],
+      confidence: Number(body.confidence),
+      assumptions: Array.isArray(body.assumptions) ? (body.assumptions as string[]).map(String) : [],
+      unresolvedQuestions: Array.isArray(body.unresolvedQuestions) ? (body.unresolvedQuestions as string[]).map(String) : [],
+      missionId: body.missionId !== undefined ? String(body.missionId) : undefined,
+      executionId: body.executionId !== undefined ? String(body.executionId) : undefined,
+    };
+    const errors = validateHandoff(handoff);
+    if (errors.length > 0) {
+      throw new AppError("VALIDATION_ERROR", "handoff contract invalid", { details: { errors } });
+    }
+    const confidence = Number(body.confidence);
+    const policy = verificationPolicyFor(confidence, DEFAULT_VERIFICATION_THRESHOLDS);
+    const id = cryptoRandomId("hnd");
+    ctx.db.insert("agent_handoffs", {
+      id,
+      org_id: me.orgId,
+      mission_id: handoff.missionId ?? null,
+      execution_id: handoff.executionId ?? null,
+      sender: handoff.sender,
+      receiver: handoff.receiver,
+      intent: handoff.intent,
+      payload: JSON.stringify(handoff.payload),
+      evidence: JSON.stringify(handoff.evidence),
+      confidence,
+      assumptions: JSON.stringify(handoff.assumptions),
+      unresolved_questions: JSON.stringify(handoff.unresolvedQuestions),
+      created_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "handoff.recorded", "handoff", id, "medium", {
+      sender: handoff.sender,
+      receiver: handoff.receiver,
+      intent: handoff.intent,
+      suggestedPolicy: policy,
+    });
+    reply.code(201);
+    return { id, suggestedPolicy: policy };
+  });
+
+  app.get("/api/v1/handoffs", async (req) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:read");
+    const q = req.query as { receiver?: string };
+    const params: unknown[] = [me.orgId];
+    let sql = "SELECT id, mission_id, execution_id, sender, receiver, intent, confidence, evidence, assumptions, unresolved_questions, created_at FROM agent_handoffs WHERE org_id=?";
+    if (q.receiver) {
+      sql += " AND receiver=?";
+      params.push(String(q.receiver));
+    }
+    sql += " ORDER BY created_at DESC LIMIT 100";
+    return {
+      items: ctx.db.all(sql, params).map((r) => ({
+        id: String(r.id),
+        missionId: r.mission_id,
+        executionId: r.execution_id,
+        sender: String(r.sender),
+        receiver: String(r.receiver),
+        intent: String(r.intent),
+        confidence: Number(r.confidence),
+        evidence: safeJson(String(r.evidence ?? "[]")),
+        assumptions: safeJson(String(r.assumptions ?? "[]")),
+        unresolvedQuestions: safeJson(String(r.unresolved_questions ?? "[]")),
+        createdAt: String(r.created_at),
+      })),
+    };
+  });
+
+  // ---------- skill runtime execution (Phase 2: enforce, don't just declare) ----------
+  app.post("/api/v1/skills/runtime/execute", async (req, reply) => {
+    const me = ident(req);
+    auth.requirePermission(me, "execution:control");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    requireFields(body, ["skillName"]);
+    const skillName = String(body.skillName);
+    const skill = effectiveSkill(ctx, me.orgId, skillName);
+    const claims = Array.isArray(body.claims) ? (body.claims as string[]).map(String) : [];
+    const started = ctx.db.now();
+    const runtime = new SkillRuntime();
+    const executionId = cryptoRandomId("skx");
+    const result = await runtime.execute(skill, {
+      input: (body.input ?? {}) as Record<string, unknown>,
+      timeoutMs: body.timeoutMs !== undefined ? Number(body.timeoutMs) : 30_000,
+      hooks: {
+        // Deterministic harness: provider execution is a slot; the runtime
+        // enforces the orchestration contract (preconditions, steps, rubric).
+        runStep: async (step, context, i) => {
+          context["_dispatched"] = true;
+          return { [`step_${i}`]: step };
+        },
+        verify: async (output) => {
+          const rubricOk = evaluateRubric(skill.verification, output);
+          if (!rubricOk) return { ok: false, notes: `rubric not satisfied: ${skill.verification}` };
+          const available = ctx.db
+            .all<{ type: string }>("SELECT DISTINCT type FROM evidence_records WHERE org_id = ?", [me.orgId])
+            .map((r) => String(r.type));
+          const unbacked = unbackedCompletionClaims(claims, available);
+          if (unbacked.length > 0) {
+            return { ok: false, notes: `evidence_required: ${unbacked.join(", ")}` };
+          }
+          return { ok: true };
+        },
+      },
+    });
+    ctx.db.insert("skill_executions", {
+      id: executionId,
+      org_id: me.orgId,
+      skill_name: skillName,
+      task_id: body.taskId !== undefined ? String(body.taskId) : null,
+      outcome: result.ok ? "success" : "failed",
+      duration_ms: Math.round(result.durationMs),
+      cost_usd: result.budgetUsd ?? null,
+      error: result.ok ? null : `${result.failureClass}: ${result.failureMessage}`.slice(0, 4000),
+      started_at: started,
+      finished_at: ctx.db.now(),
+    });
+    auditEvent(ctx, me, "skill.runtime_executed", "skill", skillName, "medium", {
+      ok: result.ok,
+      failureClass: result.failureClass,
+      escalatedTo: result.escalatedTo,
+      attempts: result.attempts,
+    });
+    reply.code(result.ok ? 200 : 422);
+    return {
+      id: executionId,
+      ok: result.ok,
+      result,
+    };
   });
 
   // ---------- agent-to-agent protocol (audit Phase 4: TaskCards v0.1) ----------
@@ -2091,10 +2445,16 @@ function featureFlags(ctx: AppContext): Record<string, boolean> {
     vectorKnowledge: ctx.config.FEATURE_VECTOR_KNOWLEDGE,
     github: Boolean(ctx.config.GITHUB_TOKEN || ctx.secrets?.get("GITHUB_TOKEN")),
     skillLoader: true,
+    skillRuntime: true,
     workflowTemplates: ctx.workflowTemplates.count() > 0,
     oidcSso: Boolean(ctx.config.OIDC_ENABLED),
     encryptionAtRest: Boolean(ctx.config.ENCRYPT_AT_REST && ctx.config.ENCRYPTION_MASTER_KEY),
     tracing: Boolean(ctx.tracing.enabled),
+    missionCompiler: true,
+    capabilityRouting: true,
+    workGraph: true,
+    handoffContract: true,
+    evidenceRegistry: true,
   };
 }
 

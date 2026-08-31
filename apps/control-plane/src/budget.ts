@@ -1,12 +1,35 @@
 import { newId } from "@agency/core";
 import type { Db } from "@agency/db";
 import type { BudgetGuard } from "@agency/models";
+import type { ModelTier } from "@agency/models";
+
+export type BudgetAction = "allow" | "block" | "downgrade" | "approve_required";
 
 export interface BudgetCheck {
   allowed: boolean;
   violatedScope?: string;
   limitUsd?: number;
   spentUsd?: number;
+}
+
+export interface BudgetEvaluation extends BudgetCheck {
+  action: BudgetAction;
+  /** Present when the violating budget's action is `downgrade`. */
+  recommendedTier?: ModelTier;
+}
+
+/**
+ * Tier the work should move to when a budget calls for downgrade (master
+ * prompt §15/§16). REVIEW never downgrades (a cheap review is not a review);
+ * FAST/VISION/LOCAL are already the cheapest rung.
+ */
+export function recommendedTierFor(tier: ModelTier): ModelTier | undefined {
+  switch (tier) {
+    case "REASONING": return "STANDARD";
+    case "SECURITY": return "STANDARD";
+    case "STANDARD": return "FAST";
+    default: return undefined;
+  }
 }
 
 /**
@@ -28,6 +51,30 @@ export class BudgetGuardImpl implements BudgetGuard {
     missionId?: string;
     taskId?: string;
   }): BudgetCheck {
+    const ev = this.evaluate(estimateUsd, scopes);
+    return {
+      allowed: ev.action === "allow" || ev.action === "downgrade",
+      violatedScope: ev.violatedScope,
+      limitUsd: ev.limitUsd,
+      spentUsd: ev.spentUsd,
+    };
+  }
+
+  /**
+   * Action-aware budget evaluation (Phase 2.4 wiring, previously schema-only):
+   *   block           → spend denied
+   *   downgrade       → spend allowed, but the router will re-select a cheaper tier
+   *   approve_required→ spend denied pending an approval decision (deferred wiring)
+   * First violating scope wins, in request → task → mission → project → org →
+   * daily → monthly evaluation order.
+   */
+  evaluate(
+    estimateUsd: number,
+    scopes: { orgId: string; projectId?: string; missionId?: string; taskId?: string } = {
+      orgId: this.getOrgId(),
+    },
+    currentTier?: ModelTier
+  ): BudgetEvaluation {
     const order: { scopeType: string; scopeId: string }[] = [];
     if (scopes.taskId) order.push({ scopeType: "task", scopeId: scopes.taskId });
     if (scopes.missionId) order.push({ scopeType: "mission", scopeId: scopes.missionId });
@@ -44,22 +91,35 @@ export class BudgetGuardImpl implements BudgetGuard {
       if (!budget) continue;
       const spent = this.spentFor(s.scopeType, s.scopeId, scopes);
       if (spent + estimateUsd > Number(budget.limit_usd)) {
+        const action = (budget.action as BudgetAction) || "block";
+        if (action === "downgrade") {
+          return {
+            allowed: true,
+            action,
+            violatedScope: `${s.scopeType}:${s.scopeId}`,
+            limitUsd: Number(budget.limit_usd),
+            spentUsd: spent,
+            recommendedTier: recommendedTierFor(currentTier ?? "STANDARD"),
+          };
+        }
         return {
           allowed: false,
+          action: action === "approve_required" ? "approve_required" : "block",
           violatedScope: `${s.scopeType}:${s.scopeId}`,
           limitUsd: Number(budget.limit_usd),
           spentUsd: spent,
         };
       }
     }
-    return { allowed: true };
+    return { allowed: true, action: "allow" };
   }
 
   allowSpend(estimatedUsd: number): boolean {
     // Router-level pre-flight uses default org scope (request-scoped checks
     // happen in the API layer where project/task context is known).
     const orgId = this.getOrgId();
-    return this.check(estimatedUsd, { orgId }).allowed;
+    const action = this.evaluate(estimatedUsd, { orgId }).action;
+    return action !== "block" && action !== "approve_required";
   }
 
   recordSpend(amountUsd: number, scopes?: {

@@ -1,4 +1,5 @@
 import type { AppContext } from "./context.ts";
+import { AGENCY_OS_VERSION } from "./version.ts";
 
 /**
  * Dependency-free Prometheus text-format exposition (GAP G-02).
@@ -121,7 +122,7 @@ export class MetricsRegistry {
 
     lines.push("# HELP agencyos_build_info Build metadata.");
     lines.push("# TYPE agencyos_build_info gauge");
-    lines.push('agencyos_build_info{version="0.10.0"} 1');
+    lines.push(`agencyos_build_info{version="${AGENCY_OS_VERSION}"} 1`);
 
     // --- Process (runtime health; no secrets) ---
     const mem = process.memoryUsage();
