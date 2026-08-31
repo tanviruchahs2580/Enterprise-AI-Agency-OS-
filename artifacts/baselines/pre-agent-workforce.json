@@ -1,0 +1,73 @@
+{
+  "kind": "baseline",
+  "name": "pre-agent-workforce",
+  "capturedAt": "2026-08-31T00:00:00.000Z",
+  "release": "v0.11.0",
+  "suite": { "tests": 183, "result": "pass" },
+  "versionDrift": [
+    {
+      "where": "apps/control-plane/src/app.ts:232 /api/v1/meta",
+      "found": "0.10.0",
+      "now": "0.12.0 via src/version.ts"
+    },
+    {
+      "where": "apps/control-plane/src/metrics.ts:124 agencyos_build_info",
+      "found": "0.10.0",
+      "now": "0.12.0 via src/version.ts"
+    },
+    {
+      "where": "apps/control-plane/src/tracing.ts:24",
+      "found": "0.10.0",
+      "now": "AGENCY_OS_TRACING_VERSION = AGENCY_OS_VERSION"
+    },
+    {
+      "where": "charts/agency-os/Chart.yaml",
+      "found": "0.10.0",
+      "now": "0.12.0"
+    },
+    {
+      "where": "charts/agency-os/values.yaml (two image tags)",
+      "found": "0.10.0",
+      "now": "0.12.0"
+    },
+    {
+      "where": "README.md status line",
+      "found": "v0.10.0",
+      "now": "v0.12.0"
+    }
+  ],
+  "gapsClosed": [
+    {
+      "gap": "skills declared but never executed — no runtime contract enforcement",
+      "proof": "packages/skills/src/runtime.ts + POST /api/v1/skills/runtime/execute"
+    },
+    {
+      "gap": "no deterministic mission classification",
+      "proof": "packages/orchestration/src/mission.ts + POST /api/v1/missions/compile"
+    },
+    {
+      "gap": "agent task dispatch without auditable why-this-agent reasoning",
+      "proof": "packages/orchestration/src/{capabilities,routing}.ts + POST /api/v1/routing/decide + routing_decisions table"
+    },
+    {
+      "gap": "no roster reachability proof",
+      "proof": "packages/orchestration/src/coverage.ts + GET /api/v1/agents/reachability"
+    },
+    {
+      "gap": "fixed pipeline only — no work-graph DAG",
+      "proof": "packages/orchestration/src/workgraph.ts"
+    },
+    {
+      "gap": "handoffs were prose, not typed contracts; no evidence registry",
+      "proof": "packages/orchestration/src/{handoff,evidence}.ts; agent_handoffs + evidence_records tables"
+    },
+    {
+      "gap": "budget action='downgrade' existed in schema but was never enforced",
+      "proof": "budget.ts evaluate() + packages/models/src/router.ts cheaper-tier re-selection"
+    }
+  ],
+  "capture": {
+    "command": "npm test",
+    "resultAfter": { "tests": 235, "result": "pass" }
+  }
+}

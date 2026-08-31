@@ -2,6 +2,19 @@
 
 Live status ledger. Updated after every phase.
 
+## v0.12.0 — agent workforce (2026-08-31)
+- [x] Skill execution runtime: preconditions/tools/permissions/rubric/budget/timeout,
+      8-class failure taxonomy, retry→escalate→fail — 15 unit tests
+- [x] Mission compiler: deterministic complexity/risk/capability classification (same input ⇒ same plan)
+- [x] Capability directory (24 caps) + auditable weighted router (`whyAgentSelected`, persisted to `routing_decisions`)
+- [x] Roster reachability: every roster agent reachable via skill/workflow/capability path
+- [x] Work-graph DAG engine: Kahn compile, cycle detection, parallel batches, skip-cascade, blocked dependents
+- [x] Typed handoff contracts (intent enum, confidence, facts/assumptions) + evidence registry (hash, tamper detect, claim guard)
+- [x] Budget `downgrade` enforced end-to-end (guard `evaluate()` → router cheaper-tier re-select)
+- [x] API wiring: missions/compile, routing/decide+decisions, agents/reachability, handoffs, evidence(+verify), skills/runtime/execute
+- [x] Version drift fixed: single `src/version.ts` → meta/metrics/tracing (0.12.0)
+- [x] Suite **235/235** (was 183) · lint/typecheck/build/self-test green · docs reconcile (CHANGELOG/ROADMAP/README/chart)
+
 ## v0.9.1 — post-upgrade validation cycle (2026-08-26)
 - [x] DEFECT: worker retry-storm on permanent delivery errors → permanence classification + single dead-letter
 - [x] DEFECT: queue success-path clobbered handler terminal states → conditional update (status='running')

@@ -1,12 +1,40 @@
 # ROADMAP
 
-Reconciled against `PROGRESS.md` (2026-08-30, Enterprise-AI-Agency-OS audit
-Phase 1 punch #1). Statuses reflect the *currently shipped* line, not aspirational
+Reconciled against `PROGRESS.md` (2026-08-31, agent-workforce gap pass).
+Statuses reflect the *currently shipped* line, not aspirational
 titles. PROGRESS.md remains the live phase ledger; every shipped item below lands
 there with evidence.
 
 Legend: `[SHIPPED]` done in tree · `[PARTIAL]` scaffolded, needs runtime/creds ·
 `[BLOCKED]` needs external decision/secret/host.
+
+## Shipped in this release (v0.12.0 — agent workforce)
+
+### Orchestration & dispatch (master-prompt gap closure)
+- `[SHIPPED]` Skill execution runtime — `packages/skills/src/runtime.ts`: the
+  orchestration contract (preconditions, tool/permission eligibility, procedure,
+  verification rubric, budget, timeout, failure handling) enforced at execution
+  time, not just declared; provider-agnostic hooks; `POST /api/v1/skills/runtime/execute`.
+- `[SHIPPED]` Mission compiler (`packages/orchestration/src/mission.ts`) —
+  deterministic complexity/risk/capability classification; `POST /api/v1/missions/compile`.
+- `[SHIPPED]` Capability directory + deterministic router (`capabilities.ts`,
+  `routing.ts`) — 24 capabilities, weighted scoring with auditable
+  `whyAgentSelected`, decisions persisted to `routing_decisions` (migration `0010`).
+- `[SHIPPED]` Roster reachability (`coverage.ts`) + `GET /api/v1/agents/reachability` —
+  every agent provably reachable via skill/workflow/capability path.
+- `[SHIPPED]` Work-graph DAG engine (`workgraph.ts`) — cycle detection, parallel
+  topological batches, conditional skip + cascade, blocked-dependents isolation.
+- `[SHIPPED]` Typed handoff contracts + evidence registry (`handoff.ts`,
+  `evidence.ts`, migration `0010`) — intent enum, confidence→verification policy,
+  content hashing/tamper detection, completion-claim guard ("no claim without
+  evidence") wired into runtime verification.
+
+### Governance & health
+- `[SHIPPED]` Budget `downgrade` action is now enforced end-to-end: action-aware
+  `BudgetGuardImpl.evaluate()` + `ModelRouter` cheaper-tier re-selection with
+  explicit `budget_downgrade_<tier>` fallback reason.
+- `[SHIPPED]` Version drift closed — single `apps/control-plane/src/version.ts`
+  feeds `/api/v1/meta`, `agencyos_build_info`, and OTel tracing (was stale `0.10.0`).
 
 ## Shipped in this release (v0.9.x + Phase-1 audit pass)
 

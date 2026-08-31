@@ -2,6 +2,57 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.12.0] — 2026-08-31
+
+### Added — agent workforce (master-prompt gap implementation)
+
+- **Skill execution runtime** (`packages/skills/src/runtime.ts`): deterministic
+  `SkillRuntime` that enforces preconditions, required tools/permissions,
+  procedure steps, verification rubric, budget/timeout and failure handling
+  (`retry(maxAttempts=…)` / escalate / fail) — provider-agnostic via hooks.
+  8-class failure taxonomy, termination-on-exhaustion, step transcript events.
+  `POST /api/v1/skills/runtime/execute` (`execution:control`) persists every
+  run to `skill_executions`; verification failures distinguishes
+  `verification_failed` from `evidence_required` when completion claims lack
+  backing evidence.
+- **Mission compiler** (`packages/orchestration/src/mission.ts`): deterministic,
+  purely syntactic classification (complexity simple→enterprise, risk
+  low/medium/high, derived capabilities + name) — same objective ⇒ same plan.
+  `POST /api/v1/missions/compile` (`mission:create`, audited, no persistence).
+- **Capability directory + auditable router** (`capabilities.ts`, `routing.ts`):
+  24-capability `CAPABILITY_DIRECTORY`; weighted `CapabilityRouter`
+  (coverage/tools/tier/risk/explicit-agent tie-break) returns
+  `whyAgentSelected` + ranked candidates. `POST /api/v1/routing/decide`
+  persists each decision to `routing_decisions` (new migration `0010`)
+  making every dispatch replayable.
+- **Roster reachability** (`coverage.ts`): verifies every roster agent is
+  reachable through *some* path (skill in registry, workflow role incl.
+  fan-out, capability). `GET /api/v1/agents/reachability` (`agent:read`).
+- **Work-graph DAG engine** (`workgraph.ts`): Kahn topological compile with
+  cycle + dangling-dependency detection; parallel batch execution with
+  conditional skip, skip-cascade, and blocked-dependents semantics.
+- **Typed handoff & evidence contracts** (`handoff.ts`, `evidence.ts`,
+  migration `0010`): validated `AgentHandoff` (intent enum, confidence,
+  facts/assumptions split), confidence→verification-policy map (standard /
+  review / escalate), evidence hashing + tamper detection, and the
+  completion-claim guard (`no claim without evidence`). APIs:
+  `POST/GET /api/v1/handoffs`, `POST/GET /api/v1/evidence`,
+  `POST /api/v1/evidence/:id/verify`.
+- **Budget `downgrade` action now enforced** (was schema-only): `BudgetGuardImpl`
+  gains `evaluate()` (action-aware + `recommendedTierFor`); `ModelRouter`
+  pre-flight honors `downgrade` by re-selecting a cheaper tier
+  (`fallbackReason=budget_downgrade_<tier>`) instead of blocking.
+- **Version drift fixed**: single `src/version.ts` (`0.12.0`) feeds
+  `/api/v1/meta`, `agencyos_build_info`, and OTel tracing attributes — the old
+  hardcoded `0.10.0` strings are gone.
+
+### Changed
+- `npm test` now **235 tests** (was 183); control-plane E2E workforce suite
+  (8 tests) covers compile/routing/reachability/handoffs/evidence/skill-exec,
+  including tenant isolation and claim-evidence gating.
+- Helm chart `version`/`appVersion` and `values.yaml` image tags
+  move to `0.12.0` (were stale `0.10.0`).
+
 ## [0.11.0] — 2026-08-30
 
 ### Added — enterprise readiness batch (audit phases 1–4, T-A…T-N)
