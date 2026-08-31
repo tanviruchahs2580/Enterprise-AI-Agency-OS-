@@ -52,8 +52,11 @@ jobs:
       - name: Build dashboard
         run: npm run build --workspace @agency/dashboard
 
-      - name: Environment self-test
+      - name: Env self-test
         run: node scripts/self-test.mjs
+
+      - name: Docs/constants drift check
+        run: npm run docs-check
 
   production-gate:
     name: production config gate

@@ -1,7 +1,7 @@
 all: help
 
 help:
-	@echo "Targets: dev | test | lint | typecheck | build | migrate | seed | self-test | verify-production"
+	@echo "Targets: dev | test | lint | typecheck | build | migrate | seed | self-test | docs-check | verify-production"
 
 dev:
 	node scripts/dev.mjs
@@ -26,6 +26,9 @@ seed:
 
 self-test:
 	npm run self-test
+
+docs-check:
+	npm run docs-check
 
 verify-production:
 	node scripts/verify-production.mjs

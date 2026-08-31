@@ -1,6 +1,6 @@
 {
   "name": "enterprise-ai-agency-os",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "Enterprise-grade, self-hostable AI Software Agency Operating System: control plane, orchestrator, model router, sandboxed agents, governance and observability.",
   "license": "Apache-2.0",
@@ -21,6 +21,7 @@
     "build": "npm run build --workspaces --if-present",
     "dev": "node scripts/dev.mjs",
     "self-test": "node scripts/self-test.mjs",
+    "docs-check": "node scripts/docs-check.mjs",
     "migrate": "node scripts/migrate.mjs",
     "seed": "node scripts/seed.mjs",
     "e2e": "playwright test"
