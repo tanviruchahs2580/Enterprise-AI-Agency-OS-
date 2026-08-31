@@ -6,6 +6,7 @@ import type {
   CompletionResult,
   ModelDescriptor,
   ModelProvider,
+  ModelTier,
   RoutingConstraints,
   RoutingPolicy,
 } from "./types.ts";
@@ -29,10 +30,32 @@ export interface RouterRecord {
   errorCode: string | null;
 }
 
+export interface BudgetScopes {
+  orgId?: string;
+  projectId?: string;
+  missionId?: string;
+  taskId?: string;
+}
+
 export interface BudgetGuard {
   /** Return true if spend is allowed; false to block. Called pre-flight. */
   allowSpend(estimatedUsd: number): boolean;
   recordSpend(amountUsd: number): void;
+  /**
+   * Optional action-aware pre-flight (Phase 2.4 wiring). When implemented, the
+   * router honours `downgrade` by re-selecting a cheaper tier instead of
+   * blocking; `approve_required` still blocks pending a decision.
+   */
+  evaluate?(
+    estimatedUsd: number,
+    scopes?: BudgetScopes,
+    currentTier?: ModelTier
+  ): {
+    allowed: boolean;
+    action: "allow" | "block" | "downgrade" | "approve_required";
+    violatedScope?: string;
+    recommendedTier?: ModelTier;
+  };
 }
 
 /** Selection candidate = concrete model + its provider + shared breaker map. */
@@ -120,19 +143,42 @@ export class ModelRouter {
         details: { constraints },
       });
     }
-    const limited = cands.slice(0, this.policy.maxFallbacks + 1);
+    const limited0 = cands.slice(0, this.policy.maxFallbacks + 1);
 
     // rough pre-flight budget estimate
     const estTokens =
       req.messages.reduce((n, m) => n + estimateTokens(m.content), 0) +
       (req.maxTokens ?? 1024);
-    const estCost = limited[0]!.model.outputCostPer1k * (estTokens / 1000);
-    if (this.opts.budget && !this.opts.budget.allowSpend(estCost)) {
-      const rec = this.record(requestId, traceId, req.requestedModel ?? "-", "-", "-", null,
-        constraints.tier ?? "STANDARD", 0, 0, 0, 0, 0, 0, "budget_blocked", "BUDGET_EXCEEDED", started);
-      throw new AppError("BUDGET_EXCEEDED", "estimated cost exceeds available budget", {
-        details: { estimatedUsd: estCost, requestId: rec.requestId },
-      });
+    const estCost = limited0[0]!.model.outputCostPer1k * (estTokens / 1000);
+    let limited = limited0;
+    let downgradedTier: ModelTier | null = null;
+    if (this.opts.budget) {
+      const ev =
+        typeof this.opts.budget.evaluate === "function"
+          ? this.opts.budget.evaluate(estCost)
+          : null;
+      const blockedAction =
+        !ev
+          ? !this.opts.budget.allowSpend(estCost)
+            ? "block"
+            : null
+          : ev.action === "block" || ev.action === "approve_required"
+            ? ev.action
+            : null;
+      if (blockedAction) {
+        const rec = this.record(requestId, traceId, req.requestedModel ?? "-", "-", "-", null,
+          constraints.tier ?? "STANDARD", 0, 0, 0, 0, 0, 0, "budget_blocked", "BUDGET_EXCEEDED", started);
+        throw new AppError("BUDGET_EXCEEDED", `estimated cost exceeds available budget (${blockedAction})`, {
+          details: { estimatedUsd: estCost, requestId: rec.requestId, action: blockedAction },
+        });
+      }
+      if (ev?.action === "downgrade" && ev.recommendedTier) {
+        const cheaper = this.select({ ...constraints, tier: ev.recommendedTier });
+        if (cheaper.length > 0) {
+          downgradedTier = ev.recommendedTier;
+          limited = cheaper.slice(0, this.policy.maxFallbacks + 1);
+        }
+      }
     }
 
     // Context-window guard: skip candidates whose window cannot hold the
@@ -172,9 +218,14 @@ export class ModelRouter {
           breaker.onSuccess();
           const cost = estimateCost(cand.model, result.usage);
           this.opts.budget?.recordSpend(cost);
+          const successReason = downgradedTier
+            ? `budget_downgrade_${downgradedTier}`
+            : fallbackCount > 0
+              ? `fallback_after_${fallbackCount}`
+              : null;
           const rec = this.record(
             requestId, traceId, req.requestedModel ?? cand.model.alias, cand.model.alias,
-            cand.provider.info.name, fallbackCount > 0 ? `fallback_after_${fallbackCount}` : null,
+            cand.provider.info.name, successReason,
             cand.model.tier, Date.now() - started,
             result.usage.tokensIn, result.usage.tokensOut, cost,
             attempt, fallbackCount, "succeeded", null, started

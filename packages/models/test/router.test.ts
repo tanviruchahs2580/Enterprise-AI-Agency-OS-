@@ -137,3 +137,60 @@ test("context overflow: request larger than every candidate window fails safely"
   );
   assert.equal(tiny.callCount, 0); // never reached the provider
 });
+
+test("budget downgrade action re-selects a cheaper tier instead of blocking", async () => {
+  const records: RouterRecord[] = [];
+  const budget: BudgetGuard = {
+    allowSpend: () => true,
+    recordSpend: () => undefined,
+    evaluate: () => ({ allowed: true, action: "downgrade", recommendedTier: "FAST" as const }),
+  };
+  const router = new ModelRouter({
+    providers: [new MockModelProvider()],
+    budget,
+    onRecord: (r) => records.push(r),
+  });
+
+  const res = await router.complete(
+    { messages: [{ role: "user", content: "budgeted out" }] },
+    { tier: "STANDARD" }
+  );
+  assert.ok(res.content.startsWith("[mock-fast]"), "downgraded to FAST");
+  const rec = records[0]!;
+  assert.equal(rec.status, "succeeded");
+  assert.match(rec.fallbackReason ?? "", /budget_downgrade_fast/i);
+});
+
+test("budget downgrade with no cheaper tier falls back to original candidates", async () => {
+  const records: RouterRecord[] = [];
+  const budget: BudgetGuard = {
+    allowSpend: () => true,
+    recordSpend: () => undefined,
+    evaluate: () => ({ allowed: true, action: "downgrade", recommendedTier: "LOCAL" as const }),
+  };
+  const router = new ModelRouter({
+    providers: [new MockModelProvider()],
+    budget,
+    onRecord: (r) => records.push(r),
+  });
+  const res = await router.complete(
+    { messages: [{ role: "user", content: "no local tier present" }] },
+    { tier: "STANDARD" }
+  );
+  assert.ok(res.content.startsWith("[mock-standard]"));
+  assert.equal(records[0]!.fallbackReason, null);
+});
+
+test("budget approve_required still blocks until a decision", async () => {
+  const budget: BudgetGuard = {
+    allowSpend: () => true,
+    recordSpend: () => undefined,
+    evaluate: () => ({ allowed: false, action: "approve_required" }),
+  };
+  const router = new ModelRouter({ providers: [new MockModelProvider()], budget });
+  await assert.rejects(
+    () => router.complete({ messages: [{ role: "user", content: "x" }] }),
+    (e: unknown) =>
+      e instanceof AppError && e.code === "BUDGET_EXCEEDED" && /approve_required/.test(e.message)
+  );
+});
