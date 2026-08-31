@@ -100,7 +100,7 @@ jobs:
             echo "workflow monitor reported an unhealthy pipeline"; exit 1
           fi
           echo "workflow monitor: pipeline healthy"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: workflow-monitor-report
