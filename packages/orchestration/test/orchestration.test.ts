@@ -145,9 +145,17 @@ test("workflow engine runs all stages, checkpoints, and completes", async () => 
   const engine = new WorkflowEngine(db);
   const defn = defaultWorkflowDefinition();
   for (const stage of defn.stages) {
-    engine.registerHandler(defn.name, stage.name, async (_s, state) => ({
-      [`out_${_s}`]: `done:${Object.keys(state).length}`,
-    }));
+    if (stage.fanOut) {
+      for (const branch of stage.fanOut) {
+        engine.registerHandler(defn.name, branch.name, async (_s, state) => ({
+          [`out_${_s}`]: `done:${Object.keys(state).length}`,
+        }));
+      }
+    } else {
+      engine.registerHandler(defn.name, stage.name, async (_s, state) => ({
+        [`out_${_s}`]: `done:${Object.keys(state).length}`,
+      }));
+    }
   }
   const run = engine.start(orgId, { projectId });
   for (let i = 0; i < defn.stages.length; i++) {
@@ -163,15 +171,20 @@ test("workflow engine runs all stages, checkpoints, and completes", async () => 
   const state = engine.getState(orgId, run.runId);
   const parsed = JSON.parse(String(state.state_json)) as Record<string, unknown>;
   assert.ok(Array.isArray(parsed.completedStages));
-  assert.equal((parsed.completedStages as string[]).length, defn.stages.length);
+  // fan-out stages contribute branches + parent, so total = stages + branches
+  const branchCount = defn.stages.reduce((n, s) => n + (s.fanOut?.length ?? 0), 0);
+  assert.equal((parsed.completedStages as string[]).length, defn.stages.length + branchCount);
 });
 
 test("workflow without handler blocks; resume after fix continues", async () => {
   const engine = new WorkflowEngine(db);
   const defn = defaultWorkflowDefinition();
-  engine.registerHandler(defn.name, "discovery", async () => ({ out: 1 }));
+  // discovery is a fan-out: register its 3 branches
+  engine.registerHandler(defn.name, "product-discovery", async () => ({ out: 1 }));
+  engine.registerHandler(defn.name, "market-research", async () => ({ out: 1 }));
+  engine.registerHandler(defn.name, "ux-discovery", async () => ({ out: 1 }));
   const run = engine.start(orgId, { definition: defn });
-  await engine.advance(run.runId); // discovery ok
+  await engine.advance(run.runId); // discovery fan-out ok
 
   // requirements has no handler yet → blocked
   await assert.rejects(() => engine.advance(run.runId), /no handler/);

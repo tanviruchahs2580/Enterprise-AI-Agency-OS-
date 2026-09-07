@@ -145,7 +145,9 @@ test("reaching every agent through a validated path", () => {
   const cap = rep.items.find((i) => i.agentId === "principal");
   assert.ok(cap!.via.some((v) => v === "capability:mission-planning"));
   const qa = rep.items.find((i) => i.agentId === "qa-engineer");
-  assert.ok(qa!.via.some((v) => v === "workflow:enterprise-feature:qa"));
+  assert.ok(qa!.via.some((v) => v.startsWith("workflow:enterprise-feature:qa")));
+  const adv = rep.items.find((i) => i.agentId === "adversarial-reviewer");
+  assert.ok(adv!.via.some((v) => v.startsWith("workflow:enterprise-feature:review")));
   const be = rep.items.find((i) => i.agentId === "backend-engineer");
   assert.ok(be!.via.some((v) => v === "skill:tdd-red-green-refactor"));
 });
@@ -322,6 +324,10 @@ test("capability directory exposes ids used by mission compiler", () => {
 
 test("default workflow binds roles that reachability uses", () => {
   const wf = defaultWorkflowDefinition();
-  assert.ok(wf.stages.some((s) => s.agentRole === "qa-engineer"));
-  assert.ok(wf.stages.some((s) => s.agentRole === "devops-engineer"));
+  const allRoles = wf.stages.flatMap((s) => (s.fanOut ? s.fanOut.map((b) => b.agentRole) : [s.agentRole]));
+  assert.ok(allRoles.includes("qa-engineer"));
+  assert.ok(allRoles.includes("devops-engineer"));
+  // enterprise redesign: dual review + parallel build tracks
+  assert.ok(allRoles.includes("adversarial-reviewer"));
+  assert.ok(allRoles.includes("frontend-engineer"));
 });

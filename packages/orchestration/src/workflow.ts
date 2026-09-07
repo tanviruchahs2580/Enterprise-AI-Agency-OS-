@@ -37,18 +37,69 @@ export type StageHandler = (
 
 const DEFAULT_WORKFLOW: WorkflowDefinition = {
   name: "enterprise-feature",
-  description: "Default SDLC workflow (master prompt §22)",
+  description:
+    "Enterprise SDLC — parallel discovery, shift-left threat model, dual-axis review, and full 24-agent coverage. Fan-outs run concurrently; wall time is governed by the critical path, not the stage count.",
   stages: [
-    { name: "discovery" },
-    { name: "requirements", agentRole: "requirements-engineer" },
-    { name: "architecture", agentRole: "architect" },
-    { name: "planning", agentRole: "captain" },
-    { name: "implementation", agentRole: "backend-engineer", retry: { maxAttempts: 3 } },
-    { name: "review", agentRole: "code-reviewer" },
-    { name: "security", agentRole: "security-engineer" },
-    { name: "qa", agentRole: "qa-engineer" },
-    { name: "deployment", agentRole: "devops-engineer", approvalRequired: true, approvalAction: "deploy:staging" },
-    { name: "monitoring", agentRole: "sre" },
+    {
+      name: "discovery",
+      description: "Parallel discovery: product intent, cited research, and UX foundations",
+      fanOut: [
+        { name: "product-discovery", agentRole: "product-manager", description: "PRD slice, story decomposition" },
+        { name: "market-research", agentRole: "research-agent", description: "Cited primary sources with source/date/confidence" },
+        { name: "ux-discovery", agentRole: "ux-designer", description: "Flows, states, a11y foundations" },
+      ],
+    },
+    { name: "requirements", agentRole: "requirements-engineer", description: "SRS, edge cases, DoR gate" },
+    {
+      name: "architecture",
+      description: "Parallel system design: C4/ADR, threat model (shift-left), and data contracts",
+      fanOut: [
+        { name: "system-design", agentRole: "architect", description: "C4, ADRs, Plan-lock" },
+        { name: "threat-model", agentRole: "security-engineer", description: "STRIDE during design, not after code" },
+        { name: "data-model", agentRole: "database-engineer", description: "Reversible migrations, query performance" },
+        { name: "analytics-spec", agentRole: "data-analytics-engineer", description: "Metrics definitions, query contracts" },
+      ],
+    },
+    {
+      name: "planning",
+      description: "Decompose, estimate, and cost",
+      fanOut: [
+        { name: "sprint-planning", agentRole: "captain", description: "Decompose, dispatch, handoff contracts" },
+        { name: "cost-plan", agentRole: "finops-agent", description: "Budget impact per option" },
+      ],
+    },
+    { name: "approval", agentRole: "principal", description: "Vision/high-risk gate — ADRs approved before build" },
+    {
+      name: "implementation",
+      description: "Parallel build tracks — backend, frontend, i18n, and cross-cutting modules",
+      fanOut: [
+        { name: "backend", agentRole: "backend-engineer", retry: { maxAttempts: 3 }, description: "APIs/services with TDD" },
+        { name: "frontend", agentRole: "frontend-engineer", retry: { maxAttempts: 2 }, description: "Accessible, responsive UI + e2e" },
+        { name: "localization", agentRole: "localization-engineer", retry: { maxAttempts: 2 }, description: "Externalized strings, locale bundles, RTL/plural" },
+        { name: "deep-module", agentRole: "staff-engineer", retry: { maxAttempts: 3 }, description: "Cross-cutting design & refactors" },
+      ],
+    },
+    {
+      name: "review",
+      description: "Two-axis review in parallel — standards and spec-fidelity",
+      fanOut: [
+        { name: "standards-review", agentRole: "code-reviewer", description: "Standards, smells, tests quality (blocking/non-blocking)" },
+        { name: "adversarial-review", agentRole: "adversarial-reviewer", description: "Spec-fidelity, attack cases" },
+      ],
+    },
+    { name: "security", agentRole: "security-engineer", description: "Final SAST/DAST + threat review gate (no critical/high open at merge)" },
+    {
+      name: "qa",
+      description: "Coverage + performance in parallel",
+      fanOut: [
+        { name: "coverage-gate", agentRole: "qa-engineer", description: "≥80% line / ≥60% branch on touched code + acceptance criteria" },
+        { name: "perf-benchmark", agentRole: "performance-engineer", description: "Before/after baselines, load test" },
+      ],
+    },
+    { name: "documentation", agentRole: "documentation-engineer", description: "Diataxis map — reference + how-to priority" },
+    { name: "release", agentRole: "release-manager", description: "SemVer, changelog, rollback plan" },
+    { name: "deployment", agentRole: "devops-engineer", approvalRequired: true, approvalAction: "deploy:staging", description: "Pipeline green + SBOM (approval gate)" },
+    { name: "monitoring", agentRole: "sre", description: "SLOs, error budgets, runbooks" },
   ],
 };
 

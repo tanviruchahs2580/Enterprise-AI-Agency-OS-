@@ -1,7 +1,8 @@
 name: research-spike
 description: >-
-  Time-boxed research spike: decompose the question, cite sources, synthesize
-  options, and cost the recommendation before any implementation decision.
+  Time-boxed research spike — decompose the question, cite sources, synthesize
+  options, cost the recommendation, persist as Diataxis docs, and obtain
+  principal approval before any implementation decision.
 stages:
   - name: decompose
     agentRole: captain
@@ -18,3 +19,6 @@ stages:
   - name: handoff
     agentRole: documentation-engineer
     description: Persist findings and recommendation as knowledge documents
+  - name: approval
+    agentRole: principal
+    description: Principal approval gate — recommendation accepted or escalated

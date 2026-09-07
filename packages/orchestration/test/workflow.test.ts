@@ -210,9 +210,9 @@ test("defaultWorkflowDefinition returns a fresh detached copy", () => {
   const b = defaultWorkflowDefinition();
   assert.notEqual(a, b);
   assert.equal(a.name, "enterprise-feature");
-  assert.equal(a.stages.length, 10);
+  assert.equal(a.stages.length, 13);
   a.stages.pop();
-  assert.equal(defaultWorkflowDefinition().stages.length, 10);
+  assert.equal(defaultWorkflowDefinition().stages.length, 13);
 });
 
 test("parseDefinition rejects malformed workflow definitions", () => {

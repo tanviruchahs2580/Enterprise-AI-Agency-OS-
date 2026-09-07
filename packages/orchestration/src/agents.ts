@@ -194,4 +194,10 @@ export const TOOL_RISK: Record<string, {
   "secrets.rotate": { risk: "critical", permission: "settings:write", destructive: true, networkAccess: false },
   "knowledge.write": { risk: "low", permission: "knowledge:write", destructive: false, networkAccess: false },
   "web.fetch": { risk: "medium", permission: "execution:control", destructive: false, networkAccess: true },
+  "task-dispatch": { risk: "medium", permission: "task:dispatch", destructive: false, networkAccess: false },
+  "docs-write": { risk: "low", permission: "knowledge:write", destructive: false, networkAccess: false },
+  "diagrams": { risk: "low", permission: "knowledge:write", destructive: false, networkAccess: false },
+  "security-scan": { risk: "medium", permission: "security:threat-model", destructive: false, networkAccess: false },
+  "load-test": { risk: "medium", permission: "execution:control", destructive: false, networkAccess: true },
+  "observability-read": { risk: "low", permission: "execution:control", destructive: false, networkAccess: true },
 };

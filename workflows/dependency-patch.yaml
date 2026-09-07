@@ -1,8 +1,8 @@
 name: dependency-patch
 description: >-
-  Routine dependency bump with regression verification. Concise and reversible;
-  skips architectural work on low-risk runs but never waives review, tests, or
-  the deploy approval.
+  Routine dependency bump — shift-left security scan, dual-axis review, and
+  parallel QA/perf verification. Skips architectural work on low-risk runs but
+  never waives review, tests, or the deploy approval.
 stages:
   - name: scan
     agentRole: security-engineer
@@ -16,9 +16,24 @@ stages:
     retry:
       maxAttempts: 2
   - name: review
-    agentRole: code-reviewer
+    description: Two-axis review — dependency bumps can hide breaking changes
+    fanOut:
+      - name: standards-review
+        agentRole: code-reviewer
+        description: Standards, dependency hygiene
+      - name: adversarial-review
+        agentRole: adversarial-reviewer
+        description: Supply-chain / transitive break analysis
   - name: tests
-    agentRole: qa-engineer
+    description: Coverage + performance in parallel
+    fanOut:
+      - name: coverage-gate
+        agentRole: qa-engineer
+        description: Coverage gate on affected modules
+      - name: perf-benchmark
+        agentRole: performance-engineer
+        lowRiskSkip: true
+        description: Before/after benchmark on low-risk skips
   - name: deploy
     agentRole: devops-engineer
     approvalRequired: true
