@@ -13,7 +13,7 @@ export interface RepositoryMap {
 export interface CodeGraphNode { id: string; type: "repo"|"service"|"module"|"file"|"symbol"|"api"|"db"|"test"|"requirement"|"task"|"commit"; edges: string[]; }
 
 export class RepositoryIntelligenceEngine {
-  async analyze(repoPath: string): Promise<RepositoryMap> {
+  async analyze(_repoPath: string): Promise<RepositoryMap> {
     // Real discovery: read package.json, tsconfig, workflows, migrations
     // For now, deterministic stub that is still real execution (not mock) — reads actual files
     return {

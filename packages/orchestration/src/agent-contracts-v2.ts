@@ -1,5 +1,4 @@
-import type { AgentDefinition, ToolId } from "./agents.ts";
-import type { ModelTier } from "@agency/models";
+import type { AgentDefinition } from "./agents.ts";
 
 /**
  * Agent Contract V2 (§5) — 24 fields, versioned, repository-defined.

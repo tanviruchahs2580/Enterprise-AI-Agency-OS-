@@ -6,13 +6,13 @@ import type { Db } from "@agency/db";
 
 // §13 Context Intelligence — bounded, traceable
 export class ContextIntelligenceEngine {
-  forTask(task: { id: string; title: string }, graph: unknown): { files: string[]; tokens: number; trace: string[] } {
+  forTask(task: { id: string; title: string }, _graph: unknown): { files: string[]; tokens: number; trace: string[] } {
     return { files: ["src/app.ts"], tokens: 1200, trace: [`task:${task.id}`] };
   }
 }
 // §14 Change Impact — dependency graph → affected components
 export class ChangeImpactAnalyzer {
-  analyze(change: string, graph: unknown): { affected: string[]; risk: "low"|"medium"|"high"|"critical" } {
+  analyze(change: string, _graph: unknown): { affected: string[]; risk: "low"|"medium"|"high"|"critical" } {
     return { affected: [change], risk: change.includes("payment") ? "high" : "low" };
   }
 }
@@ -39,12 +39,12 @@ export class TaskGraphEngineV2 {
 export class CheckpointStore {
   private db: Db;
   constructor(db: Db) { this.db = db; }
-  save(id: string, state: unknown): void { /* persisted to workflow_runs.state_json already */ }
-  load(id: string): unknown { return null; }
+  save(_id: string, _state: unknown): void { /* persisted to workflow_runs.state_json already */ }
+  load(_id: string): unknown { return null; }
 }
 // §6 Policy + §8 Dynamic Permission
 export class PolicyEngine {
-  effectivePermission(agent: string, taskRisk: string, env: string, stage: string, approval: boolean): boolean {
+  effectivePermission(_agent: string, taskRisk: string, env: string, _stage: string, approval: boolean): boolean {
     if (env==="production" && taskRisk==="critical" && !approval) return false;
     return true;
   }
@@ -78,15 +78,15 @@ export class DeploymentEngine {
 }
 // §45-47 Observability + Incident
 export class ObservabilityEngine {
-  track(metric: string, value: number): void { /* logs/metrics/traces */ }
+  track(_metric: string, _value: number): void { /* logs/metrics/traces */ }
   async incident(detection: string): Promise<string> { return `incident:${detection}`; }
 }
 // §48-49 Memory (project/architecture/decision/failure/incident etc., verified vs inference)
 export class MemoryEngine {
   private db: Db;
   constructor(db: Db) { this.db = db; }
-  save(kind: string, content: unknown, verified: boolean): void { /* knowledge_documents with kind */ }
-  query(kind: string): unknown[] { return []; }
+  save(_kind: string, _content: unknown, _verified: boolean): void { /* knowledge_documents with kind */ }
+  query(_kind: string): unknown[] { return []; }
 }
 // §61 Conformance Engine
 export class ConformanceEngine {
