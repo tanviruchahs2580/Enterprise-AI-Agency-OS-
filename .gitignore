@@ -17,6 +17,7 @@ data/
 *.sqlite3
 *.db
 !test/fixtures/*.sqlite
+!docs/data/**
 
 # Logs
 logs/

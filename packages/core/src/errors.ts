@@ -1,6 +1,7 @@
 /** Structured application error. Never leak stack traces to clients. */
 export type ErrorCode =
   | "VALIDATION_ERROR"
+  | "COVERAGE_GATE_FAILED"
   | "UNAUTHENTICATED"
   | "FORBIDDEN"
   | "NOT_FOUND"
@@ -15,6 +16,7 @@ export type ErrorCode =
 
 const STATUS: Record<ErrorCode, number> = {
   VALIDATION_ERROR: 400,
+  COVERAGE_GATE_FAILED: 422,
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   NOT_FOUND: 404,

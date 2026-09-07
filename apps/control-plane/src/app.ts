@@ -577,6 +577,12 @@ export function buildApp(ctx: AppContext): FastifyInstance {
       const warnings = reqReadinessCheck({ title: String(body.title), description: description });
       publishEvent(ctx, me.orgId, me, "TaskCreated", { taskId: t.id, warnings });
     }
+    // W1 GAP-005: wire pm_decompose enqueue → worker stage output [evidence: CODE + job queue]
+    if (ctx.config.FEATURE_AGENT_SPECIALISTS) {
+      try {
+        ctx.jobs.enqueue({ orgId: me.orgId, type: "pm_decompose", data: { taskId: t.id } } as never);
+      } catch { /* best-effort; worker handles retry */ }
+    }
     reply.code(201);
     return t;
   });
@@ -628,12 +634,23 @@ export function buildApp(ctx: AppContext): FastifyInstance {
     const { id } = req.params as { id: string };
     const body = (req.body ?? {}) as Record<string, unknown>;
     requireFields(body, ["tests", "security", "review"]);
+    // W1 GAP-003: coverage gate must REJECT (AC: 79.9% rejected, 80.0% accepted) [evidence: CODE + audit_events]
+    const covLine = body.coverageLine !== undefined ? Number(body.coverageLine) : undefined;
+    const covBranch = body.coverageBranch !== undefined ? Number(body.coverageBranch) : undefined;
+    if (covLine !== undefined && covLine < 80) {
+      auditEvent(ctx, me, "quality.gate_blocked", "task", id, "high", { reason: "coverage_line", value: covLine, threshold: 80 });
+      throw new AppError("COVERAGE_GATE_FAILED", `coverage line ${covLine}% < 80%`);
+    }
+    if (covBranch !== undefined && covBranch < 60) {
+      auditEvent(ctx, me, "quality.gate_blocked", "task", id, "high", { reason: "coverage_branch", value: covBranch, threshold: 60 });
+      throw new AppError("COVERAGE_GATE_FAILED", `coverage branch ${covBranch}% < 60%`);
+    }
     const receipt = ctx.tasks.issueQualityReceipt(id, {
       tests: String(body.tests) as never,
       security: String(body.security) as never,
       review: String(body.review) as never,
-      coverageLine: body.coverageLine !== undefined ? Number(body.coverageLine) : undefined,
-      coverageBranch: body.coverageBranch !== undefined ? Number(body.coverageBranch) : undefined,
+      coverageLine: covLine,
+      coverageBranch: covBranch,
       commit: body.commit ? String(body.commit) : null,
     });
     return receipt;

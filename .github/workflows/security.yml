@@ -50,3 +50,38 @@ jobs:
         with:
           name: sbom
           path: sbom.json
+
+  codeql:
+    name: SAST (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        # AC GAP-004: block on crit/high — CodeQL sarif upload fails the job on finding
+
+  zap:
+    name: DAST (ZAP baseline on staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # ZAP baseline: fails on HIGH risk (adjust -I as needed); DOC-ONLY until staging exists, but job must be CODE evidence
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: "http://localhost:3000/api/v1/meta"
+          fail_action: true
+          allow_issue_writing: false
