@@ -2,6 +2,17 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.13.1] — 2026-09-07
+
+### Fixed
+
+- **Version alignment:** `apps/control-plane/src/version.ts` + `charts/agency-os/{Chart.yaml,values.yaml}` synced to `0.13.1` (was `0.12.0` drift vs `package.json` `0.13.0` tag).
+
+### Added — enterprise governance (Phases 0–10)
+
+- 27 governance docs: audit, roadmap, SDLC, RACI, registers, HLD/LLD, ADR-0001, NFR, OpenAPI, style-guide, branching, infra, QA, security (CodeQL+ZAP), SLO, FinOps, etc.
+- Two clean sprints `PROJ-001/002` traced `G0→G7` via 13-stage fan-out (30 stages).
+
 ## [0.12.0] — 2026-08-31
 
 ### Added — agent workforce (master-prompt gap implementation)
