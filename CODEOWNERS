@@ -1,6 +1,14 @@
-# Code owners — reviews required for sensitive areas (master prompt §14/§96)
+# Code owners — reviews required for sensitive areas (Phase 3, §14)
+
 *                       @tanviruchahs2580
+/packages/orchestration/ @tanviruchahs2580
 /packages/security/     @tanviruchahs2580
 /packages/db/           @tanviruchahs2580
+/packages/models/       @tanviruchahs2580
 /.github/workflows/     @tanviruchahs2580
 /docker/                @tanviruchahs2580
+/docs/architecture/     @tanviruchahs2580
+/docs/adr/              @tanviruchahs2580
+/openapi.yaml           @tanviruchahs2580
+
+# Diff budget: PRs >400 lines flagged by reviewer; >400 must be decomposed (style-guide.md).

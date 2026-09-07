@@ -14,6 +14,7 @@ export default tseslint.config(
       ],
       "@typescript-eslint/consistent-type-imports": "error",
       "no-throw-literal": "error",
+      complexity: ["warn", 10],
     },
   },
   {

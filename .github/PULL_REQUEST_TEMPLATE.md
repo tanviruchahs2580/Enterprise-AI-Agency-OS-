@@ -11,6 +11,15 @@
 - [ ] test — adding/updating tests
 - [ ] chore — tooling/ci/build
 
+## Branch / diff
+
+- Branch: `agency/PROJ-###-slug` (trunk-based, ≤3 days)
+- Diff size: ~ ___ lines (budget ≤400; >400 must be decomposed — `docs/engineering/style-guide.md`)
+
+## Complexity
+
+- [ ] No function exceeds **complexity 10** (or escape hatch `// eslint-disable-next-line complexity -- PROJ-###: reason` with Tech Lead approval)
+
 ## Governance & quality checklist
 
 - [ ] `npm run lint` passes

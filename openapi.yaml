@@ -1,0 +1,69 @@
+openapi: 3.1.0
+info:
+  title: Agency OS Control Plane
+  version: 1.0.0
+  description: API-first contract before implementation (Phase 2, G1). Error envelope is standard; pagination/sort/filter and idempotency on mutations.
+servers:
+  - url: http://localhost:3000
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId, retryable]
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            requestId: { type: string }
+            retryable: { type: boolean }
+    Ticket:
+      type: object
+      required: [id, orgId, projectId, title, status]
+      properties:
+        id: { type: string, pattern: "^PROJ-[0-9]{3,}" }
+        title: { type: string, minLength: 8 }
+        status: { type: string, enum: [Backlog, Ready, In Progress, In Review, In QA, Staging, Released, Done, Blocked, Cancelled] }
+security: [{ bearerAuth: [] }]
+paths:
+  /api/v1/meta:
+    get: { summary: Meta (version, capabilities), operationId: getMeta, responses: { "200": { description: ok } } }
+  /api/v1/agents:
+    get: { summary: List agents, responses: { "200": { description: ok } } }
+  /api/v1/agents/reachability:
+    get: { summary: Reachability (24/24), responses: { "200": { description: ok } } }
+  /api/v1/skills/runtime/execute:
+    post:
+      summary: Execute skill (evidence-gated, 422 evidence_required)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [skillName], properties: { skillName: { type: string }, claims: { type: array, items: { type: string } } } } } } }
+      responses: { "200": { description: success }, "422": { description: evidence_required, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } } }
+  /api/v1/missions/compile:
+    post: { summary: Compile mission (deterministic), responses: { "200": { description: ok } } }
+  /api/v1/routing/decide:
+    post: { summary: Route capability (scored, persisted), responses: { "201": { description: created } } }
+  /api/v1/handoffs:
+    get: { summary: List handoffs }
+    post: { summary: Create handoff (validateHandoff), responses: { "201": { description: created } } }
+  /api/v1/evidence:
+    get: { summary: List evidence }
+    post: { summary: Add evidence (hashContent) }
+  /api/v1/evidence/{id}/verify:
+    post: { summary: Verify tamper }
+  /api/v1/workflows:
+    get: { summary: List templates (4) }
+  /api/v1/workflows/{name}/start:
+    post: { summary: Start workflow }
+  /api/v1/tasks:
+    get: { summary: List tasks (paginated, filterable), parameters: [{ name: page, in: query, schema: { type: integer } }, { name: limit, in: query, schema: { type: integer } }] }
+    post:
+      summary: Create task (idempotency-Key header)
+      parameters: [{ name: Idempotency-Key, in: header, schema: { type: string } }]
+      responses: { "201": { description: created } }
+  /api/v1/tasks/{id}/reviews:
+    post: { summary: Review (axis standards|adversarial, two-axis) }
+  /api/v1/tasks/{id}/receipt:
+    post: { summary: Quality receipt (80/60 gate) }
