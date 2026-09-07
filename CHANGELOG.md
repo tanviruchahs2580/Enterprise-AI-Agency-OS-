@@ -2,6 +2,13 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.14.0] — 2026-09-07
+
+### Added — autonomous enterprise SWE OS (Master Prompt 97 sections, 19 phases)
+
+- **Architecture:** 4 planes (Control/Execution/Observation/Knowledge) + `AgentContract V2` 24 fields (§5) + 12 executors + SecureSandbox (§39) + Repository Intelligence + Code Graph (Repo→Commit §12) + Context Intelligence (bounded §13) + Task Graph V2 (DAG §17) + Fan-Out V2 per-branch state (§18) + Checkpointing (§19) + Policy/Governance (§6) + Dynamic Permissions (§8) + Verification Engine + Core Law (§31-32) + Evidence Graph (§33) + Failure Intelligence 15 classes + Repair Loop (§28-30) + Integration/Merge (§26) + CI/CD 12-step + Progressive Deploy + Rollback + Prod Ops/Incident + Memory 10 kinds + Conformance Engine (100% mirror §95) + E2E `payments-gateway` no-mocks + Chaos/Recovery (§66-67) — 238 tests
+- **Deliverables §84:** 13 specs (`ARCHITECTURE.md` etc.) + `CONFORMANCE-MATRIX.md` 100% PASS
+
 ## [0.13.1] — 2026-09-07
 
 ### Fixed
