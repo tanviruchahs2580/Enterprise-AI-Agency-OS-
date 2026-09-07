@@ -16,14 +16,14 @@ export class ChangeImpactAnalyzer {
     return { affected: [change], risk: change.includes("payment") ? "high" : "low" };
   }
 }
-// §16 State Machine — 12 states, policy-controlled
-export type TaskState = "PENDING"|"RUNNING"|"WAITING"|"VERIFYING"|"PASSED"|"FAILED"|"RETRYING"|"RECOVERING"|"BLOCKED"|"ESCALATED"|"SKIPPED"|"CANCELLED";
+// §16 State Machine — 12 states + UNKNOWN (verification), policy-controlled
+export type TaskState = "PENDING"|"RUNNING"|"WAITING"|"VERIFYING"|"PASSED"|"FAILED"|"RETRYING"|"RECOVERING"|"BLOCKED"|"ESCALATED"|"SKIPPED"|"CANCELLED"|"UNKNOWN";
 export class StateMachine {
   private transitions: Record<TaskState, TaskState[]> = {
     PENDING: ["RUNNING","CANCELLED"], RUNNING: ["WAITING","VERIFYING","FAILED","BLOCKED"],
     WAITING: ["RUNNING","CANCELLED"], VERIFYING: ["PASSED","FAILED","UNKNOWN"],
     PASSED: [], FAILED: ["RETRYING","RECOVERING","ESCALATED","BLOCKED"],
-    RETRYING: ["RUNNING"], RECOVERING: ["RUNNING"], BLOCKED: ["ESCALATED"], ESCALATED: [], SKIPPED: [], CANCELLED: [],
+    RETRYING: ["RUNNING"], RECOVERING: ["RUNNING"], BLOCKED: ["ESCALATED"], ESCALATED: [], SKIPPED: [], CANCELLED: [], UNKNOWN: [],
   };
   can(from: TaskState, to: TaskState): boolean { return (this.transitions[from]||[]).includes(to); }
   assert(from: TaskState, to: TaskState): void { if(!this.can(from,to)) throw new Error(`invalid ${from}→${to}`); }
