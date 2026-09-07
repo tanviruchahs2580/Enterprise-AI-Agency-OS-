@@ -3,5 +3,5 @@
  * metrics agencyos_build_info, and OTel tracing all read this — never hardcode
  * a version string in three places (docs-check enforces the invariant).
  */
-export const AGENCY_OS_VERSION = "0.14.0";
+export const AGENCY_OS_VERSION = "0.14.1";
 export const AGENCY_OS_VERSION_CODENAME = "autonomous-enterprise";

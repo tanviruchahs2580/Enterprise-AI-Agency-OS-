@@ -265,10 +265,9 @@ export class WorkflowEngine {
   }
 
   /**
-   * Runs the fan-out branches of `stage` concurrently (Promise.all) and merges
-   * the outputs under `state[stage.name][branch.name]`. A branch failure marks
-   * the whole run failed — partial branch work is never checkpointed as
-   * converged because the run only persists state after all branches resolve.
+   * Fan-Out V2 — per-branch state (§18, §50-51). Preserves successful branches,
+   * checkpoints each branch individually, retries only failed branches.
+   * Convergence policy: all branches must PASS to advance (future: majority/any).
    */
   private async advanceFanOut(
     runId: string,
@@ -279,40 +278,75 @@ export class WorkflowEngine {
     codec: FieldCodec
   ): Promise<{ status: string; currentStage: string | null }> {
     const workflowName = state.definition.name;
-    try {
-      const branches = await Promise.all(
-        (stage.fanOut ?? []).map(async (branch) => {
-          const h = this.handlers.get(workflowName)?.get(branch.name);
-          if (!h) {
-            throw new AppError("DEPENDENCY_UNAVAILABLE", `no handler registered for fan-out branch '${branch.name}'`);
-          }
-          try {
-            const output = await h(branch.name, { ...state, $branch: branch.name, $fanOut: stage.name });
-            return { branch: branch.name, output };
-          } catch (e) {
-            throw new AppError("INTERNAL", `branch '${branch.name}' (fan-out '${stage.name}') failed`, { cause: e });
-          }
-        })
-      );
-      state[stage.name] = Object.fromEntries(branches.map((b) => [b.branch, b.output]));
-      for (const b of branches) state.completedStages.push(b.branch);
+    // Per-branch checkpointing (§50-51): preserve successes, retry only failures
+    const fanOut = stage.fanOut ?? [];
+    const completed = new Set(state.completedStages as string[]);
+    const branchState = (state[stage.name] as Record<string, unknown>) ?? {};
+    // Filter to branches not yet completed
+    const pending = fanOut.filter((b) => !completed.has(b.name));
+    if (pending.length === 0) {
+      // All branches already completed — converge
       state.completedStages.push(stage.name);
-    } catch (e) {
-      this.setStatus(runId, "failed");
-      throw e instanceof AppError ? e : new AppError("INTERNAL", `fan-out '${stage.name}' failed`, { cause: e });
+      const nextIdx = idx + 1;
+      if (nextIdx >= stages.length) {
+        this.db.transaction(() => {
+          this.persistState(runId, state, "__done__", codec);
+          this.setStatus(runId, "succeeded");
+        });
+        return { status: "succeeded", currentStage: null };
+      }
+      const next = stages[nextIdx]!;
+      this.persistState(runId, state, next.name, codec);
+      return { status: "running", currentStage: next.name };
     }
-
-    const nextIdx = idx + 1;
-    if (nextIdx >= stages.length) {
-      this.db.transaction(() => {
-        this.persistState(runId, state, "__done__", codec);
-        this.setStatus(runId, "succeeded");
-      });
-      return { status: "succeeded", currentStage: null };
+    const results = await Promise.allSettled(
+      pending.map(async (branch) => {
+        const h = this.handlers.get(workflowName)?.get(branch.name);
+        if (!h) throw new AppError("DEPENDENCY_UNAVAILABLE", `no handler for branch '${branch.name}'`);
+        const output = await h(branch.name, { ...state, $branch: branch.name, $fanOut: stage.name });
+        return { branch: branch.name, output };
+      })
+    );
+    const successes: { branch: string; output: unknown }[] = [];
+    const failures: { branch: string; error: unknown }[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i]!;
+      const branch = pending[i]!.name;
+      if (r.status === "fulfilled") successes.push(r.value);
+      else failures.push({ branch, error: (r as PromiseRejectedResult).reason });
     }
-    const next = stages[nextIdx]!;
-    this.persistState(runId, state, next.name, codec);
-    return { status: "running", currentStage: next.name };
+    // Checkpoint successes immediately
+    const merged = { ...(branchState as object) } as Record<string, unknown>;
+    for (const s of successes) {
+      merged[s.branch] = s.output;
+      if (!completed.has(s.branch)) state.completedStages.push(s.branch);
+    }
+    state[stage.name] = merged;
+    this.persistState(runId, state, stage.name, codec);
+    if (failures.length > 0) {
+      // Preserve successes, stay on same stage for retry of failures
+      const msg = failures.map((f) => `${f.branch}: ${String((f.error as Error)?.message ?? f.error)}`).join("; ");
+      // Do not mark run failed — allow retry of failed branches (bounded by caller)
+      throw new AppError("INTERNAL", `fan-out '${stage.name}' partial failure (${failures.length}/${fanOut.length}): ${msg}`);
+    }
+    // All pending succeeded — check if all branches now done
+    const allDone = fanOut.every((b) => (state.completedStages as string[]).includes(b.name));
+    if (allDone) {
+      state.completedStages.push(stage.name);
+      const nextIdx = idx + 1;
+      if (nextIdx >= stages.length) {
+        this.db.transaction(() => {
+          this.persistState(runId, state, "__done__", codec);
+          this.setStatus(runId, "succeeded");
+        });
+        return { status: "succeeded", currentStage: null };
+      }
+      const next = stages[nextIdx]!;
+      this.persistState(runId, state, next.name, codec);
+      return { status: "running", currentStage: next.name };
+    }
+    // Should not reach — remain on same stage
+    return { status: "running", currentStage: stage.name };
   }
 
   pauseForApproval(runId: string, action: string, resourceRef: Record<string, unknown>): void {

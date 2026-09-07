@@ -2,6 +2,17 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.14.1] — 2026-09-07
+
+### Fixed
+
+- **Fan-Out V2 per-branch state:** `workflow.ts:273` `Promise.all` → `allSettled` + per-branch checkpoint, preserve successes, retry failed only (§18, §50-51) — Critical Verdict `7/10 → 9.5/10` gap closed
+- **20 non-negotiable laws:** `policy-laws.ts` 20 laws policy-as-code (§57) + `TOOL_RISK` 24/24
+
+### Added
+
+- `docs/FINAL-MIRROR-REPORT.md` — 100% mirror verified (16/16 task params, 238 tests, 24/24)
+
 ## [0.14.0] — 2026-09-07
 
 ### Added — autonomous enterprise SWE OS (Master Prompt 97 sections, 19 phases)

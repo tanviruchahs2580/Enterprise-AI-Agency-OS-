@@ -2,8 +2,8 @@ apiVersion: v2
 name: agency-os
 description: Enterprise AI Agency OS — control plane + dashboard (Kubernetes)
 type: application
-version: 0.14.0
-appVersion: "0.14.0"
+version: 0.14.1
+appVersion: "0.14.1"
 kubeVersion: ">=1.25.0-0"
 keywords:
   - ai

@@ -173,11 +173,13 @@ test("a failing fan-out branch fails the whole run without a partial checkpoint"
     stages: [{ name: "fan", fanOut: [{ name: "ok" }, { name: "boom" }] }, { name: "never" }],
   };
   const { runId } = define(defn);
-  await assert.rejects(() => engine.advance(runId), /branch 'boom' \(fan-out 'fan'\) failed/);
+  await assert.rejects(() => engine.advance(runId), /fan-out 'fan' partial failure.*boom/);
   const row = engine.getState(orgId, runId);
-  assert.equal(row.status, "failed");
+  // Per-branch V2: preserves successes, remains running for retry (not failed)
+  assert.equal(row.status, "running");
   const state = JSON.parse(String(row.state_json)) as { completedStages: string[] };
-  // the fan-out stage was never persisted as completed
+  assert.ok(state.completedStages.includes("ok"));
+  assert.ok(!state.completedStages.includes("boom"));
   assert.ok(!state.completedStages.includes("fan"));
 });
 
