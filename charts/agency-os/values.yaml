@@ -10,11 +10,11 @@ replicaCount: 1
 image:
   controlPlane:
     repository: agencyos/control-plane
-    tag: "0.14.1"
+    tag: "0.14.2"
     pullPolicy: IfNotPresent
   dashboard:
     repository: agencyos/dashboard
-    tag: "0.14.1"
+    tag: "0.14.2"
     pullPolicy: IfNotPresent
 
 # Control plane service name — the shipped dashboard image proxies /api/ to

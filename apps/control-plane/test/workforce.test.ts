@@ -92,7 +92,7 @@ test("GET /api/v1/meta advertises 0.12.0 with the workforce features", async () 
     features: Record<string, boolean>;
     capabilities: Record<string, unknown>;
   };
-  assert.equal(body.version, "0.14.1");
+  assert.equal(body.version, "0.14.2");
   assert.equal(body.features.missionCompiler, true);
   assert.equal(body.features.capabilityRouting, true);
   assert.equal(body.features.workGraph, true);

@@ -2,6 +2,12 @@
 
 All notable changes. Format: Keep a Changelog; versioning: SemVer.
 
+## [0.14.2] — 2026-09-07
+
+### Added
+
+- **Workflow + Agent reports:** `docs/WORKFLOW-PROJECT-BUILD-REPORT.md` (13-stage per-branch) + `docs/AGENT-DESIGN-REPORT.md` (24 V2) — current condition `v0.14.1` live verified `48/48`
+
 ## [0.14.1] — 2026-09-07
 
 ### Fixed
